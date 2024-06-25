@@ -3,8 +3,11 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
 
 use lgtv_manager::LgTvManagerMessage::{Connect, Disconnect, SendTvCommand, ShutDown};
-use lgtv_manager::{Connection, ConnectionSettings, LgTvManager, LgTvManagerOutputMessage, TvCommand::{VolumeDown, VolumeUp}};
 use lgtv_manager::ManagerStatus::Disconnected;
+use lgtv_manager::{
+    Connection, ConnectionSettings, LgTvManager, LgTvManagerOutputMessage,
+    TvCommand::{VolumeDown, VolumeUp},
+};
 
 #[tokio::main]
 async fn main() -> Result<(), ()> {
@@ -29,7 +32,9 @@ async fn main() -> Result<(), ()> {
 
                 if LgTvManagerOutputMessage::Status(Disconnected) == manager_output_msg {
                     println!("\n>>> Manager currently disconnected and ready to receive messages.");
-                    println!(">>> SEND CONNECT ('c') COMMAND FIRST. NETWORK IP NEEDS TO BE VALID. <<<");
+                    println!(
+                        ">>> SEND CONNECT ('c') COMMAND FIRST. NETWORK IP NEEDS TO BE VALID. <<<"
+                    );
                     println!(concat!(
                         ">>> Enter command: c (connect), u (volume up), d (volume down), ",
                         "i (disconnect), s (shut down)\n"
