@@ -234,9 +234,9 @@ async fn main() -> Result<(), ()> {
                 );
 
                 if LgTvManagerOutputMessage::Status(Disconnected) == manager_output_msg {
-                    println!("\n>>> Manager currently disconnected and ready to receive messages.");
+                    println!("\n>>> Manager is disconnected and ready to receive messages.");
                     println!(
-                        ">>> SEND CONNECT ('c') COMMAND FIRST. NETWORK IP NEEDS TO BE VALID. <<<"
+                        ">>> SEND CONNECT ('c') COMMAND FIRST; NETWORK IP NEEDS TO BE VALID <<<"
                     );
                     println!(concat!(
                         ">>> Enter command: c (connect), u (volume up), d (volume down), ",
