@@ -52,7 +52,7 @@ pub enum State {
     /// Disconnecting from the TV.
     Disconnecting,
     /// An unrecoverable problem has occurred. The Manager is unresponsive and will only respond
-    /// (at best) to `LgTvManagerMessage::ShutDown` requests.
+    /// (at best) to `ManagerMessage::ShutDown` requests.
     // Cannot be transitioned into or out of. This state exists only so the LgTvManager can inform
     // the caller that it is unresponsive and should be shut down.
     Zombie,
