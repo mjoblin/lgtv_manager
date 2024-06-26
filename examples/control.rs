@@ -2,10 +2,10 @@ use env_logger;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
 
-use lgtv_manager::LgTvManagerMessage::{Connect, Disconnect, SendTvCommand, ShutDown};
+use lgtv_manager::ManagerMessage::{Connect, Disconnect, SendTvCommand, ShutDown};
 use lgtv_manager::ManagerStatus::Disconnected;
 use lgtv_manager::{
-    Connection, ConnectionSettings, LgTvManager, LgTvManagerOutputMessage,
+    Connection, ConnectionSettings, LgTvManager, ManagerOutputMessage,
     TvCommand::{VolumeDown, VolumeUp},
 };
 
@@ -30,7 +30,7 @@ async fn main() -> Result<(), ()> {
                     manager_output_msg
                 );
 
-                if LgTvManagerOutputMessage::Status(Disconnected) == manager_output_msg {
+                if ManagerOutputMessage::Status(Disconnected) == manager_output_msg {
                     println!("\n>>> Manager is disconnected and ready to receive messages");
                     println!(">>> SEND CONNECT ('c') COMMAND FIRST; TV IP MUST BE VALID");
                     println!(concat!(
@@ -98,7 +98,7 @@ async fn main() -> Result<(), ()> {
         Ok(())
     });
 
-    // Run the manager until instructed to shut down (LgTvManagerMessage::ShutDown)
+    // Run the manager until instructed to shut down (ManagerMessage::ShutDown)
     manager.run().await;
 
     stdin_handle.await.map_err(|_| ())?

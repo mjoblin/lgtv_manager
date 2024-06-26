@@ -3,8 +3,8 @@ use tokio::sync::mpsc;
 
 use lgtv_manager::{
     LgTvManager,
-    LgTvManagerMessage::{Discover, ShutDown},
-    LgTvManagerOutputMessage,
+    ManagerMessage::{Discover, ShutDown},
+    ManagerOutputMessage,
 };
 
 #[tokio::main]
@@ -25,7 +25,7 @@ async fn main() -> Result<(), ()> {
         loop {
             if let Some(manager_output_msg) = from_manager.recv().await {
                 match manager_output_msg {
-                    LgTvManagerOutputMessage::DiscoveredDevices(devices) => {
+                    ManagerOutputMessage::DiscoveredDevices(devices) => {
                         match devices.len() {
                             0 => println!("\nNo LG TV devices found.\n"),
                             _ => println!("\nDiscovered devices:\n\n{:?}\n", devices),
