@@ -4,6 +4,8 @@
 //! volume or mute. `GetVolumeSubscription` is different in that it subscribes to announcements
 //! from the TV regarding any changes in the volume or mute setting.
 
+use std::fmt;
+
 use serde_json::{Map, Value};
 
 use crate::{
@@ -14,7 +16,7 @@ use crate::{
 const GET_VOLUME_SUBSCRIPTION_ID: &str = "get_volume_subscription";
 
 /// LG control commands.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum TvCommand {
     /// Get current software information for the TV.
@@ -40,6 +42,17 @@ pub enum TvCommand {
     VolumeDown,
     /// Increase the volume level by one step.
     VolumeUp,
+}
+
+impl fmt::Display for TvCommand {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            TvCommand::SetMute(val) => write!(f, "SetMute({})", val),
+            TvCommand::SetScreenOn(val) => write!(f, "SetScreenOn({})", val),
+            TvCommand::SetVolume(val) => write!(f, "SetVolume({})", val),
+            variant => write!(f, "{:?}", variant),
+        }
+    }
 }
 
 impl From<TvCommand> for String {
@@ -181,7 +194,7 @@ impl From<TvCommand> for String {
 mod tests {
     use super::TvCommand;
 
-    // LGCommand payload string creation. These assume that serde will always serialize keys in
+    // TvCommand payload string creation. These assume that serde will always serialize keys in
     // the same order.
 
     #[test]
@@ -306,5 +319,24 @@ mod tests {
             payload,
             r#"{"type":"request","id":"test-id","uri":"ssap://audio/volumeUp","payload":null}"#
         );
+    }
+
+    // TvCommand display
+
+    #[test]
+    fn tvcommand_display() {
+        assert_eq!(TvCommand::GetCurrentSWInfo.to_string(), "GetCurrentSWInfo");
+        assert_eq!(TvCommand::GetPowerState.to_string(), "GetPowerState");
+        assert_eq!(TvCommand::GetSystemInfo.to_string(), "GetSystemInfo");
+        assert_eq!(TvCommand::GetVolume.to_string(), "GetVolume");
+        assert_eq!(TvCommand::SetMute(true).to_string(), "SetMute(true)");
+        assert_eq!(TvCommand::SetMute(false).to_string(), "SetMute(false)");
+        assert_eq!(TvCommand::SetScreenOn(true).to_string(), "SetScreenOn(true)");
+        assert_eq!(TvCommand::SetScreenOn(false).to_string(), "SetScreenOn(false)");
+        assert_eq!(TvCommand::SetVolume(10).to_string(), "SetVolume(10)");
+        assert_eq!(TvCommand::SubscribeGetVolume.to_string(), "SubscribeGetVolume");
+        assert_eq!(TvCommand::TurnOff.to_string(), "TurnOff");
+        assert_eq!(TvCommand::VolumeDown.to_string(), "VolumeDown");
+        assert_eq!(TvCommand::VolumeUp.to_string(), "VolumeUp");
     }
 }

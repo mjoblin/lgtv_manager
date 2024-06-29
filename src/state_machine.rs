@@ -14,6 +14,7 @@
 
 use log::{debug, error, info, warn};
 use rust_fsm::*;
+use std::fmt;
 use tokio::select;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio_util::sync::CancellationToken;
@@ -56,6 +57,16 @@ pub enum State {
     // Cannot be transitioned into or out of. This state exists only so the LgTvManager can inform
     // the caller that it is unresponsive and should be shut down.
     Zombie,
+}
+
+impl fmt::Display for State {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            State::Connecting(val) => write!(f, "Connecting({})", val),
+            State::Connected(val) => write!(f, "Connected({})", val),
+            variant => write!(f, "{:?}", variant),
+        }
+    }
 }
 
 /// State machine transition inputs.
@@ -354,4 +365,33 @@ async fn send_update(
     sender.send(message).await.map_err(|_| {
         warn!("State machine update channel closed");
     })
+}
+
+// ================================================================================================
+// Tests
+
+#[cfg(test)]
+mod tests {
+    use super::State;
+    use crate::TvCommand;
+
+    #[test]
+    fn state_display() {
+        assert_eq!(TvCommand::GetCurrentSWInfo.to_string(), "GetCurrentSWInfo");
+
+        assert_eq!(State::Disconnected.to_string(), "Disconnected");
+        assert_eq!(
+            State::Connecting("wss://127.0.0.1:3001/".into()).to_string(),
+            "Connecting(wss://127.0.0.1:3001/)"
+        );
+        assert_eq!(
+            State::Connected("wss://127.0.0.1:3001/".into()).to_string(),
+            "Connected(wss://127.0.0.1:3001/)"
+        );
+        assert_eq!(State::Pairing.to_string(), "Pairing");
+        assert_eq!(State::Initializing.to_string(), "Initializing");
+        assert_eq!(State::Communicating.to_string(), "Communicating");
+        assert_eq!(State::Disconnecting.to_string(), "Disconnecting");
+        assert_eq!(State::Zombie.to_string(), "Zombie");
+    }
 }
