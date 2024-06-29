@@ -10,21 +10,21 @@ includes additional commands for reference).
 
 `LgTvManager`:
 
-* Handles the WebSocket connection to an LG TV, including pairing.
-* Accepts [`ManagerMessage`] messages from the caller to:
-  * Connect, disconnect, shut down, etc.
-  * Send [`TvCommand`] messages (e.g. increase volume) to the TV.
-* Sends [`ManagerOutputMessage`] updates back to the caller:
-  * After a successful connection:
-    * The [`TvInfo`] (such as model name, etc).
-    * The [`TvInput`] list (such as HDMI, etc).
-    * The [`TvSoftwareInfo`] (such as webOS version, etc).
-    * The [`TvState`] (such as the current volume level).
-  * As required during the lifetime of a connection:
-    * Updates to the [`ManagerStatus`].
-    * Updates to the [`TvState`] (such as the current volume level).
-  * Errors.
-* Supports UPnP discovery of LG TVs.
+1. Handles the WebSocket connection to an LG TV, including pairing.
+2. Accepts [`ManagerMessage`] messages from the caller to:
+    * Connect, disconnect, shut down, etc.
+    * Send [`TvCommand`] messages (e.g. increase volume) to the TV.
+3. Sends [`ManagerOutputMessage`] updates back to the caller:
+    * After a successful connection:
+        * The [`TvInfo`] (e.g. model name).
+        * The [`TvInput`] list (e.g. HDMI).
+        * The [`TvSoftwareInfo`] (e.g. webOS version).
+        * The [`TvState`] (e.g. current volume level).
+    * As required during the lifetime of a connection:
+        * Updates to the [`ManagerStatus`].
+        * Updates to the [`TvState`].
+    * Errors.
+4. Supports UPnP discovery of LG TVs.
 
 To view the full documentation, clone the repository and run `cargo doc --open`.
 
@@ -37,21 +37,19 @@ cargo run --example discover
 
 ### Note
 
-Communication with `LgTvManager` is asynchronous. Commands are invoked on the TV by sending an
+Communication with `LgTvManager` is asynchronous. Commands are invoked on the TV by sending a
 [`ManagerMessage`] to the manager. There is no guarantee that the manager will send an associated
-[`ManagerOutputMessage`] back to the caller. However, any changes to the TV's state (such as a new
+[`ManagerOutputMessage`] back to the caller. However, any changes to the TV's state (like a new
 volume setting) will be passed back to the caller via [`ManagerOutputMessage::TvState`].
 
 `LgTvManager` also subscribes to volume and mute updates from the TV. This means volume or mute
 changes made by other sources, such as the TV's remote control, will be reflected in `TvState`
 updates. `TvState` contains the entire state of the TV at the time the message was sent.
 
-In summary, most use cases will rely on sending [`ManagerMessage::SendTvCommand`] messages to
-control the TV; and processing any received [`ManagerOutputMessage::TvState`] messages.
-
-This pattern may not work for some use cases. It would be possible to extend `LgTvManager` to
-support associating commands with responses via a message ID.
-
+Most use cases will rely on sending [`ManagerMessage::SendTvCommand`] messages to control the TV;
+and processing any received [`ManagerOutputMessage::TvState`] messages. This asynchronous pattern
+may not always be desirable. It would be possible to extend `LgTvManager` to support associating
+commands with responses via a message ID.
 ## Common usage flow
 
 1. **Discover** LG TVs on the network using UPnP discovery.
@@ -89,7 +87,7 @@ Connect to a TV by sending a [`ManagerMessage::Connect`] message to the manager.
 made to a TV by host, or by discovered UPnP device.
 
 Connection settings must be specified. Use `ConnectionSettings::default()` or the
-[`ConnectionSettingsBuilder`]:
+[`ConnectionSettingsBuilder`].
 
 ```
 use lgtv_manager::{
@@ -160,12 +158,11 @@ See [`LgTvManager`] for a diagram of the state flow.
 
 ## Sending LG commands
 
-Once a successful connection has been established and the manager has returned a
-`ManagerOutputMessage::Status(Communicating)` message, arbitrary commands can be sent to the
-TV.
+Once a successful connection has been established and the manager has returned
+`ManagerOutputMessage::Status(Communicating)`, arbitrary commands can be sent to the TV.
 
-Commands are sent using the [`ManagerMessage::SendTvCommand`] message. Supported commands can be
-seen in [`TvCommand`].
+Commands are sent using [`ManagerMessage::SendTvCommand`]. Supported commands can be seen in
+[`TvCommand`].
 
 It is expected that the most common commands to send to the TV will be those that change the TV's
 state (such as `SetMute`, `VolumeUp`, etc). Any changes to the TV's state will be received via
