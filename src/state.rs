@@ -11,7 +11,7 @@ use crate::messages::GetSystemInfoPayload;
 const PERSISTED_STATE_FILE: &str = "lgtv_manager_data.json";
 
 /// Current TV state for the managed LG TV.
-#[derive(Debug, Default, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq, Hash)]
 pub struct TvState {
     pub power_state: Option<String>,
     pub volume: Option<u8>,
@@ -21,7 +21,7 @@ pub struct TvState {
 }
 
 /// TV information for the managed LG TV.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub struct TvInfo {
     pub receiver_type: String,
     pub model_name: String,

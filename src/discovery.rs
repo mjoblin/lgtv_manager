@@ -11,7 +11,7 @@ use rupnp::ssdp::{SearchTarget, URN};
 const MEDIA_RENDERER: URN = URN::device("schemas-upnp-org", "MediaRenderer", 1);
 
 /// A UPnP Device representation of an LG TV.
-#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Deserialize, serde::Serialize)]
 pub struct LgTvDevice {
     pub friendly_name: String,
     pub model: String,
@@ -25,7 +25,7 @@ impl fmt::Display for LgTvDevice {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "'{}' ({}) [{}]",
+            "{} ({}) [{}]",
             self.friendly_name, self.model, self.udn
         )
     }
@@ -103,4 +103,28 @@ pub(crate) async fn discover_lgtv_devices() -> Result<Vec<LgTvDevice>, String> {
     );
 
     Ok(discovered_lgtv_devices)
+}
+
+// ================================================================================================
+// Tests
+
+#[cfg(test)]
+mod tests {
+    use super::LgTvDevice;
+
+    #[test]
+    fn lgtvdevice_display() {
+        assert_eq!(
+            LgTvDevice {
+                friendly_name: "LG WebOS TV".to_string(),
+                model: "model".to_string(),
+                model_number: None,
+                serial_number: None,
+                url: "http://38.0.101.76:3000".to_string(),
+                udn: "uuid:00000000-0000-0000-0000-000000000000".to_string(),
+            }
+            .to_string(),
+            "LG WebOS TV (model) [uuid:00000000-0000-0000-0000-000000000000]"
+        )
+    }
 }

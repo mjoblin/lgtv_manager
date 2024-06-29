@@ -405,7 +405,7 @@ use websocket::{LgTvWebSocket, WsCommand, WsMessage, WsStatus, WsUpdateMessage};
 // CHANNEL MESSAGES -------------------------------------------------------------------------------
 
 /// Messages sent from the caller to the [`LgTvManager`].
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ManagerMessage {
     /// Connect to an LG TV using either a host/IP or a UPnP device.
     Connect(Connection),
@@ -420,17 +420,17 @@ pub enum ManagerMessage {
 }
 
 /// Messages sent from the [`LgTvManager`] back to the caller.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ManagerOutputMessage {
-    /// At attempt to act on a received [`ManagerMessage`] was not possible. For example,
-    /// attempting to send a [`TvCommand`] without an established connection.
-    ActionUnavailable(String),
     /// Any LG TVs discovered via UPnP discovery.
     DiscoveredDevices(Vec<LgTvDevice>),
     /// Is UPnP discovery being performed.
     IsDiscovering(bool),
     /// An [`LgTvManager`] error occurred.
-    ManagerError(String),
+    Error(ManagerError),
+    /// The manager is resetting. This is usually fine (perhaps caused by an inability to connect
+    /// to a TV). The manager should be functional again once in the `Disconnected` state.
+    Resetting(String),
     /// Current manager status.
     Status(ManagerStatus),
     /// TV information (model name, etc).
@@ -441,6 +441,26 @@ pub enum ManagerOutputMessage {
     TvState(TvState),
     /// A TV error occurred.
     TvError(String),
+}
+
+// ================================================================================================
+// Errors
+
+/// Errors sent from the [`LgTvManager`] back to the caller.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ManagerError {
+    /// At attempt to act on a received [`ManagerMessage`] was not possible. For example,
+    /// attempting to send a [`TvCommand`] without an established connection.
+    Action(String),
+    /// An error occurred with the connection to a TV.
+    Connection(String),
+    /// An error occurred during UPnP discovery of LG TVs.
+    Discovery(String),
+    /// A fatal error has occurred. A Fatal error is unrecoverable and the manager should be
+    /// considered unavailable.
+    Fatal(String),
+    /// An error occurred during pairing with a TV.
+    Pair(String),
 }
 
 // ================================================================================================
@@ -671,7 +691,7 @@ impl LgTvManager {
                     match manager_msg {
                         ManagerMessage::Connect(connection) => {
                             if let Err(e) = self.initiate_connect_to_tv(connection).await {
-                                let _ = self.send_out(ManagerOutputMessage::ManagerError(e)).await;
+                                let _ = self.send_out(ManagerOutputMessage::Error(ManagerError::Connection(e))).await;
                             }
                         }
                         ManagerMessage::Disconnect => {
@@ -732,12 +752,12 @@ impl LgTvManager {
                                 self.handle_successful_disconnect().await;
                             },
                             Output::HandleConnectionError => {
-                                self.force_manager_reset("An unexpected WebSocket error occurred").await;
+                                self.force_manager_reset("A WebSocket error occurred").await;
                             }
                         }
                         StateMachineUpdateMessage::TransitionError(error) => {
                             error!("State machine transition error: {:?}", &error);
-                            let _ = self.send_out(ManagerOutputMessage::ActionUnavailable(error)).await;
+                            let _ = self.send_out(ManagerOutputMessage::Error(ManagerError::Action(error))).await;
                         }
                     }
                 }
@@ -764,8 +784,9 @@ impl LgTvManager {
                                         let _ = self.send_to_fsm(Input::DisconnectionComplete).await;
                                     }
                                     WsStatus::Error(error) => {
-                                        error!("Received WebSocket error: {:?}", &error);
-                                        self.attempt_fsm_error(error.clone()).await;
+                                        let msg = format!("WebSocket error: {:?}", &error);
+                                        error!("{}", &msg);
+                                        self.attempt_fsm_error(ManagerError::Connection(msg)).await;
                                     }
                                 }
                             },
@@ -775,8 +796,10 @@ impl LgTvManager {
                                 match serde_json::from_str::<LgTvResponse>(&ws_payload) {
                                     Ok(lgtv_response) => {
                                         if let Err(e) = self.handle_lgtv_response(lgtv_response).await {
+                                            // Note: LG errors are handled in handle_lgtv_response()
+                                            //  and will result in a separate TvError message being
+                                            //  sent to the caller.
                                             error!("{}", &e);
-                                            let _ = self.send_out(ManagerOutputMessage::ManagerError(e)).await;
                                         }
                                     },
                                     Err(error) => {
@@ -813,10 +836,7 @@ impl LgTvManager {
         warn!("Forcing a manager reset: {}", reason);
 
         let _ = self
-            .send_out(ManagerOutputMessage::ManagerError(format!(
-                "Manager is being reset: {}",
-                reason
-            )))
+            .send_out(ManagerOutputMessage::Resetting(reason.to_string()))
             .await;
 
         debug!("Forcing WebSocket handler shutdown");
@@ -841,6 +861,8 @@ impl LgTvManager {
 
         info!("Resetting the state machine");
         let _ = self.send_to_fsm(Input::Reset).await;
+
+        self.emit_manager_status().await;
 
         info!("Manager reset complete");
     }
@@ -884,10 +906,12 @@ impl LgTvManager {
                     )
                     .await;
                 }
-                Err(_) => {
+                Err(e) => {
                     let _ = LgTvManager::send_out_with_sender(
                         &output_tx,
-                        ManagerOutputMessage::ManagerError("Discovery failed".into()),
+                        ManagerOutputMessage::Error(ManagerError::Discovery(format!(
+                            "Discovery failed: {e}"
+                        ))),
                     )
                     .await;
                 }
@@ -968,7 +992,7 @@ impl LgTvManager {
                             pair_type => {
                                 let msg = format!("Unexpected pair type: {pair_type}");
                                 error!("Pair request error: {}", &msg);
-                                self.attempt_fsm_error(msg).await;
+                                self.attempt_fsm_error(ManagerError::Pair(msg)).await;
                             }
                         }
                     }
@@ -1139,6 +1163,8 @@ impl LgTvManager {
     async fn initialize_connection(&mut self) {
         info!("Initializing TV connection");
 
+        // TODO: See if screen on/off state can be determined
+
         let _ = self
             .send_to_ws(WsMessage::Payload(TvCommand::GetCurrentSWInfo.into()))
             .await;
@@ -1185,21 +1211,31 @@ impl LgTvManager {
     ///
     /// This should trigger an attempt to cleanly shut down an existing WebSocket connected and
     /// return to a clean Disconnected state.
-    async fn attempt_fsm_error(&mut self, msg: String) {
+    async fn attempt_fsm_error(&mut self, manager_error: ManagerError) {
         let _ = self.send_to_fsm(Input::Error).await;
-        let _ = self.send_out(ManagerOutputMessage::ManagerError(msg)).await;
+        let _ = self
+            .send_out(ManagerOutputMessage::Error(manager_error))
+            .await;
     }
 
     /// Enter a zombie state.
     ///
     /// A manager in the zombie state is effectively dormant and can no longer transition into
     /// new states. It should likely be shut down with `ManagerMessage::ShutDown`.
-    async fn enter_zombie_state(&mut self) {
+    async fn enter_zombie_state(&mut self, reason: &str) {
         error!(
-            "{}{}",
+            "{}{}{}",
             "Entering zombie (unresponsive) state; the manager should probably be shut down by ",
-            "sending ManagerMessage:ShutDown"
+            "sending ManagerMessage:ShutDown. Reason: ",
+            reason
         );
+
+        let _ = self
+            .send_out(ManagerOutputMessage::Error(ManagerError::Fatal(
+                reason.into(),
+            )))
+            .await;
+
         self.set_manager_status(State::Zombie).await;
     }
 
@@ -1236,11 +1272,7 @@ impl LgTvManager {
                     let msg = "The channel to the state machine has unexpectedly closed";
                     error!("{}", &msg);
 
-                    let _ = self
-                        .send_out(ManagerOutputMessage::ManagerError(msg.into()))
-                        .await;
-
-                    self.enter_zombie_state().await;
+                    self.enter_zombie_state(msg).await;
 
                     Err(())
                 }

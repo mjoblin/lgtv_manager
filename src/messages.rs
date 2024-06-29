@@ -118,7 +118,7 @@ pub(crate) struct LgTvCommandResponse {
 // GetCurrentSwInformation
 
 /// TV software information for the managed LG TV.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CurrentSwInfoPayload {
     #[doc(hidden)]
     #[serde(rename = "returnValue")]
