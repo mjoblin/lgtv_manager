@@ -15,11 +15,15 @@ includes additional commands for reference).
 * Accepts `ManagerMessage` messages from the caller to:
   * Connect, disconnect, shut down, etc.
   * Send `TvCommand` messages (e.g. increase volume) to the TV.
-* Sends `ManagerOutputMessage` updates back to the caller, providing information on:
-  * The `TvInfo` (such as model name, etc).
-  * The `TvSoftwareInfo` (such as webOS version, etc).
-  * Updates to the `ManagerStatus`.
-  * Updates to the `TvState` (such as the current volume level).
+* Sends `ManagerOutputMessage` updates back to the caller:
+  * After a successful connection:
+    * The `TvInfo` (such as model name, etc).
+    * The `TvInput` list (such as HDMI, etc).
+    * The `TvSoftwareInfo` (such as webOS version, etc).
+    * The `TvState` (such as the current volume level).
+  * As required during the lifetime of a connection:
+    * Updates to the `ManagerStatus`.
+    * Updates to the `TvState` (such as the current volume level).
   * Errors.
 * Supports UPnP discovery of LG TVs.
 
@@ -39,9 +43,9 @@ Communication with `LgTvManager` is asynchronous. Commands are invoked on the TV
 `ManagerOutputMessage` back to the caller. However, any changes to the TV's state (such as a new
 volume setting) will be passed back to the caller via `ManagerOutputMessage::TvState`.
 
-`LgTvManager` also subscribes to updates from the TV. This means changes made by other sources,
-such as the TV's remote control, will also be reflected in `TvState` updates. `TvState` contains
-the entire state of the TV at the time the message was sent.
+`LgTvManager` also subscribes to volume and mute updates from the TV. This means volume or mute
+changes made by other sources, such as the TV's remote control, will be reflected in `TvState`
+updates. `TvState` contains the entire state of the TV at the time the message was sent.
 
 In summary, most use cases will rely on sending `ManagerMessage::SendTvCommand` messages to
 control the TV; and processing any received `ManagerOutputMessage::TvState` messages.
@@ -114,9 +118,8 @@ as the host, such as `ws://10.0.1.101:3000/`, in which case the host will be use
 When using `Connection::Device`, the WebSocket server URL is generated using the UPnP
 device url. This assumes the `wss://` scheme on port `3001`.
 
-After a successful connection, the manager will emit `TvInfo`, `TvSoftwareInfo`, and
-`TvState`
-details.
+After a successful connection, the manager will emit `TvInfo`, `TvInput`, `TvSoftwareInfo`,
+and `TvState` details.
 
 #### Pairing and client keys
 

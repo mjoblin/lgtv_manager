@@ -34,6 +34,7 @@ pub(crate) struct LgTvRequest {
 #[serde(untagged)]
 pub(crate) enum LgTvResponsePayload {
     CurrentSwInfo(CurrentSwInfoPayload),
+    GetExternalInputList(GetExternalInputListPayload),
     GetPowerState(GetPowerStatePayload),
     GetSystemInfo(GetSystemInfoPayload),
     GetVolume(GetVolumePayload),
@@ -136,6 +137,37 @@ pub struct CurrentSwInfoPayload {
     pub eco_info: String,
     pub config_key: String,
     pub language_code: String,
+}
+
+// GetExternalInputList
+
+/// A TV input (e.g. HDMI).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ExternalInput {
+    pub id: String,
+    pub label: String,
+    pub port: i64,
+    pub connected: bool,
+    #[serde(rename = "appId")]
+    pub app_id: String,
+    pub icon: String,
+    #[serde(rename = "forceIcon")]
+    pub force_icon: bool,
+    pub modified: bool,
+    #[serde(rename = "lastUniqueId")]
+    pub last_unique_id: i64,
+    #[serde(rename = "hdmiPlugIn")]
+    pub hdmi_plug_in: bool,
+    #[serde(rename = "subCount")]
+    pub sub_count: i64,
+    pub favorite: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct GetExternalInputListPayload {
+    #[serde(rename = "returnValue")]
+    pub return_value: bool,
+    pub devices: Vec<ExternalInput>,
 }
 
 // GetPowerState
