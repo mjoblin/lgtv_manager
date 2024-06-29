@@ -14,11 +14,15 @@ includes additional commands for reference).
 * Accepts [`ManagerMessage`] messages from the caller to:
   * Connect, disconnect, shut down, etc.
   * Send [`TvCommand`] messages (e.g. increase volume) to the TV.
-* Sends [`ManagerOutputMessage`] updates back to the caller, providing information on:
-  * The [`TvInfo`] (such as model name, etc).
-  * The [`TvSoftwareInfo`] (such as webOS version, etc).
-  * Updates to the [`ManagerStatus`].
-  * Updates to the [`TvState`] (such as the current volume level).
+* Sends [`ManagerOutputMessage`] updates back to the caller:
+  * After a successful connection:
+    * The [`TvInfo`] (such as model name, etc).
+    * The [`TvInput`] list (such as HDMI, etc).
+    * The [`TvSoftwareInfo`] (such as webOS version, etc).
+    * The [`TvState`] (such as the current volume level).
+  * As required during the lifetime of a connection:
+    * Updates to the [`ManagerStatus`].
+    * Updates to the [`TvState`] (such as the current volume level).
   * Errors.
 * Supports UPnP discovery of LG TVs.
 
@@ -38,9 +42,9 @@ Communication with `LgTvManager` is asynchronous. Commands are invoked on the TV
 [`ManagerOutputMessage`] back to the caller. However, any changes to the TV's state (such as a new
 volume setting) will be passed back to the caller via [`ManagerOutputMessage::TvState`].
 
-`LgTvManager` also subscribes to updates from the TV. This means changes made by other sources,
-such as the TV's remote control, will also be reflected in `TvState` updates. `TvState` contains
-the entire state of the TV at the time the message was sent.
+`LgTvManager` also subscribes to volume and mute updates from the TV. This means volume or mute
+changes made by other sources, such as the TV's remote control, will be reflected in `TvState`
+updates. `TvState` contains the entire state of the TV at the time the message was sent.
 
 In summary, most use cases will rely on sending [`ManagerMessage::SendTvCommand`] messages to
 control the TV; and processing any received [`ManagerOutputMessage::TvState`] messages.
@@ -116,9 +120,8 @@ as the host, such as `ws://10.0.1.101:3000/`, in which case the host will be use
 When using [`Connection::Device`], the WebSocket server URL is generated using the UPnP
 device url. This assumes the `wss://` scheme on port `3001`.
 
-After a successful connection, the manager will emit [`TvInfo`], [`TvSoftwareInfo`], and
-[`TvState`]
-details.
+After a successful connection, the manager will emit [`TvInfo`], [`TvInput`], [`TvSoftwareInfo`],
+and [`TvState`] details.
 
 ### Pairing and client keys
 
@@ -394,7 +397,7 @@ use helpers::{
     device_host, generate_lgtv_message_id, generate_possible_websocket_url,
     generate_register_request,
 };
-pub use messages::CurrentSwInfoPayload as TvSoftwareInfo;
+pub use messages::{CurrentSwInfoPayload as TvSoftwareInfo, ExternalInput as TvInput};
 use messages::{LgTvResponse, LgTvResponsePayload};
 use state::{read_persisted_state, write_persisted_state, PersistedState};
 pub use state::{TvInfo, TvState};
@@ -435,6 +438,8 @@ pub enum ManagerOutputMessage {
     Status(ManagerStatus),
     /// TV information (model name, etc).
     TvInfo(Option<TvInfo>),
+    /// TV inputs (HDMI, etc).
+    TvInputs(Option<Vec<TvInput>>),
     /// TV software information.
     TvSoftwareInfo(Box<Option<TvSoftwareInfo>>),
     /// TV state (current volume and mute settings, etc).
@@ -560,6 +565,7 @@ pub struct LgTvManager {
     // General manager state
     manager_status: ManagerStatus, // LgTvManager manager_status is just the state machine state
     tv_info: Option<TvInfo>,
+    tv_inputs: Option<Vec<TvInput>>,
     tv_software_info: Option<TvSoftwareInfo>,
     tv_state: TvState,
     client_key: Option<String>, // Unique LG client key, provided by the TV after pairing
@@ -618,6 +624,7 @@ impl LgTvManager {
         let mut manager = LgTvManager {
             manager_status: ManagerStatus::Disconnected,
             tv_info: None,
+            tv_inputs: None,
             tv_software_info: None,
             tv_state: TvState::default(),
             client_key: None,
@@ -870,6 +877,7 @@ impl LgTvManager {
     /// Initialize the manager state fields to "no TV seen" values.
     async fn initialize_manager_state(&mut self) {
         self.tv_info = None;
+        self.tv_inputs = None;
         self.tv_software_info = None;
         self.tv_state = TvState::default();
         self.connection_details = None;
@@ -879,6 +887,7 @@ impl LgTvManager {
         self.read_persisted_state();
 
         self.emit_tv_info().await;
+        self.emit_tv_inputs().await;
         self.emit_tv_software_info().await;
         self.emit_tv_state().await;
     }
@@ -946,6 +955,10 @@ impl LgTvManager {
                     LgTvResponsePayload::CurrentSwInfo(software_info_payload) => {
                         self.tv_software_info = Some((*software_info_payload).clone());
                         self.emit_tv_software_info().await;
+                    }
+                    LgTvResponsePayload::GetExternalInputList(external_inputs_payload) => {
+                        self.tv_inputs = Some(external_inputs_payload.devices.clone());
+                        self.emit_tv_inputs().await;
                     }
                     LgTvResponsePayload::GetPowerState(power_state_payload) => {
                         self.tv_state.power_state = Some(power_state_payload.state.clone());
@@ -1169,6 +1182,9 @@ impl LgTvManager {
             .send_to_ws(WsMessage::Payload(TvCommand::GetCurrentSWInfo.into()))
             .await;
         let _ = self
+            .send_to_ws(WsMessage::Payload(TvCommand::GetExternalInputList.into()))
+            .await;
+        let _ = self
             .send_to_ws(WsMessage::Payload(TvCommand::GetPowerState.into()))
             .await;
         let _ = self
@@ -1328,6 +1344,13 @@ impl LgTvManager {
     async fn emit_tv_info(&mut self) {
         let _ = self
             .send_out(ManagerOutputMessage::TvInfo(self.tv_info.clone()))
+            .await;
+    }
+
+    /// Send the current `TvInput` list to the caller.
+    async fn emit_tv_inputs(&mut self) {
+        let _ = self
+            .send_out(ManagerOutputMessage::TvInputs(self.tv_inputs.clone()))
             .await;
     }
 
