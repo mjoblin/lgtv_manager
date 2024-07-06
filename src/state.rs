@@ -10,6 +10,13 @@ use crate::messages::GetSystemInfoPayload;
 
 const PERSISTED_STATE_FILE: &str = "lgtv_manager_data.json";
 
+/// Information on the TV last connected to by the Manager.
+#[derive(Debug, Default, Clone, PartialEq, Hash)]
+pub struct LastSeenTv {
+    pub websocket_url: Option<String>,
+    pub client_key: Option<String>,
+}
+
 /// Current TV state for the managed LG TV.
 #[derive(Debug, Default, Clone, PartialEq, Hash)]
 pub struct TvState {

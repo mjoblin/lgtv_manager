@@ -16,6 +16,7 @@ includes additional commands for reference).
     * Send [`TvCommand`] messages (e.g. increase volume) to the TV.
 3. Sends [`ManagerOutputMessage`] updates back to the caller:
     * After a successful connection:
+        * The [`LastSeenTv`].
         * The [`TvInfo`] (e.g. model name).
         * The [`TvInput`] list (e.g. HDMI).
         * The [`TvSoftwareInfo`] (e.g. webOS version).
@@ -118,8 +119,8 @@ as the host, such as `ws://10.0.1.101:3000/`, in which case the host will be use
 When using [`Connection::Device`], the WebSocket server URL is generated using the UPnP
 device url. This assumes the `wss://` scheme on port `3001`.
 
-After a successful connection, the manager will emit [`TvInfo`], [`TvInput`], [`TvSoftwareInfo`],
-and [`TvState`] details.
+After a successful connection, the manager will emit [`LastSeenTv`], [`TvInfo`], [`TvInput`],
+[`TvSoftwareInfo`], and [`TvState`] details.
 
 ### Pairing and client keys
 
@@ -397,7 +398,7 @@ use helpers::{
 pub use messages::{CurrentSwInfoPayload as TvSoftwareInfo, ExternalInput as TvInput};
 use messages::{LgTvResponse, LgTvResponsePayload};
 use state::{read_persisted_state, write_persisted_state, PersistedState};
-pub use state::{TvInfo, TvState};
+pub use state::{LastSeenTv, TvInfo, TvState};
 pub use state_machine::State as ManagerStatus;
 use state_machine::{start_state_machine, Input, Output, StateMachineUpdateMessage};
 use websocket::{LgTvWebSocket, WsCommand, WsMessage, WsStatus, WsUpdateMessage};
@@ -413,6 +414,9 @@ pub enum ManagerMessage {
     Disconnect,
     /// Perform UPnP discovery for LG TVs on the network.
     Discover,
+    /// Request sending of all currently-known Manager and TV state as instances of
+    /// `ManagerOutputMessage`.
+    EmitAllState,
     /// Send the given [`TvCommand`] to the connected TV.
     SendTvCommand(TvCommand),
     /// Shut down the [`LgTvManager`]. Disconnects from the TV and stops the manager task.
@@ -424,10 +428,13 @@ pub enum ManagerMessage {
 pub enum ManagerOutputMessage {
     /// Any LG TVs discovered via UPnP discovery.
     DiscoveredDevices(Vec<LgTvDevice>),
-    /// Is UPnP discovery being performed.
-    IsDiscovering(bool),
     /// An [`LgTvManager`] error occurred.
     Error(ManagerError),
+    /// Is UPnP discovery being performed.
+    IsDiscovering(bool),
+    /// Information on the TV last connected to by the Manager. Connection may have been
+    /// established during a previous session.
+    LastSeenTv(LastSeenTv),
     /// The manager is resetting. This is usually fine (perhaps caused by an inability to connect
     /// to a TV). The manager should be functional again once in the `Disconnected` state.
     Resetting(String),
@@ -704,6 +711,10 @@ impl LgTvManager {
                         ManagerMessage::Discover => {
                             self.discover();
                         },
+                        ManagerMessage::EmitAllState => {
+                            self.emit_manager_status().await;
+                            self.emit_all_tv_details().await;
+                        }
                         ManagerMessage::SendTvCommand(lgtv_command) => {
                             let _ = self.send_to_fsm(Input::SendCommand(lgtv_command)).await;
                         },
@@ -882,7 +893,12 @@ impl LgTvManager {
         self.ws_url = None;
 
         self.read_persisted_state();
+        self.emit_all_tv_details().await;
+    }
 
+    /// Emit all current TV details to the caller.
+    async fn emit_all_tv_details(&mut self) {
+        self.emit_last_seen_tv().await;
         self.emit_tv_info().await;
         self.emit_tv_inputs().await;
         self.emit_tv_software_info().await;
@@ -1335,6 +1351,22 @@ impl LgTvManager {
 
         self.manager_status = status;
         self.emit_manager_status().await;
+
+        // When entering a Communicating state from a non-Communicating state, we assume that we've
+        // established a new connection so we announce this as a new LastSeenTv.
+        if let ManagerStatus::Communicating(_) = self.manager_status {
+            self.emit_last_seen_tv().await;
+        }
+    }
+
+    /// Send `LastSeenTv` details to the caller.
+    async fn emit_last_seen_tv(&mut self) {
+        let _ = self
+            .send_out(ManagerOutputMessage::LastSeenTv(LastSeenTv {
+                websocket_url: self.ws_url.clone(),
+                client_key: self.client_key.clone(),
+            }))
+            .await;
     }
 
     /// Send the current `TvInfo` to the caller.
