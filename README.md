@@ -17,6 +17,7 @@ includes additional commands for reference).
     * Send `TvCommand` messages (e.g. increase volume) to the TV.
 3. Sends `ManagerOutputMessage` updates back to the caller:
     * After a successful connection:
+        * The `LastSeenTv`.
         * The `TvInfo` (e.g. model name).
         * The `TvInput` list (e.g. HDMI).
         * The `TvSoftwareInfo` (e.g. webOS version).
@@ -116,8 +117,8 @@ as the host, such as `ws://10.0.1.101:3000/`, in which case the host will be use
 When using `Connection::Device`, the WebSocket server URL is generated using the UPnP
 device url. This assumes the `wss://` scheme on port `3001`.
 
-After a successful connection, the manager will emit `TvInfo`, `TvInput`, `TvSoftwareInfo`,
-and `TvState` details.
+After a successful connection, the manager will emit `LastSeenTv`, `TvInfo`, `TvInput`,
+`TvSoftwareInfo`, and `TvState` details.
 
 #### Pairing and client keys
 
