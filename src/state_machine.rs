@@ -12,9 +12,10 @@
 //!        requested.
 //! 5. Disconnect from the TV.
 
+use std::fmt;
+
 use log::{debug, error, info, warn};
 use rust_fsm::*;
-use std::fmt;
 use tokio::select;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio_util::sync::CancellationToken;
@@ -44,14 +45,14 @@ pub enum State {
     Connecting(String),
     /// WebSocket connection to the TV has been established at the provided url.
     Connected(String),
-    /// Attempting to pair with the TV (TV is prompting for pairing confirmation).
-    Pairing,
-    /// Initializing the paired connection to the TV (subscribing to TV updates).
-    Initializing,
-    /// Able to send [`TvCommand`] messages to the TV.
-    Communicating,
-    /// Disconnecting from the TV.
-    Disconnecting,
+    /// Attempting to pair with the TV at the provided url (TV is prompting for pairing confirmation).
+    Pairing(String),
+    /// Initializing the paired connection to the TV at the provided url (subscribing to TV updates).
+    Initializing(String),
+    /// Able to send [`TvCommand`] messages to the TV at the provided url.
+    Communicating(String),
+    /// Disconnecting from the TV at the provided url.
+    Disconnecting(String),
     /// An unrecoverable problem has occurred. The Manager is unresponsive and will only respond
     /// (at best) to `ManagerMessage::ShutDown` requests.
     // Cannot be transitioned into or out of. This state exists only so the LgTvManager can inform
@@ -64,6 +65,10 @@ impl fmt::Display for State {
         match self {
             State::Connecting(val) => write!(f, "Connecting({})", val),
             State::Connected(val) => write!(f, "Connected({})", val),
+            State::Pairing(val) => write!(f, "Pairing({})", val),
+            State::Initializing(val) => write!(f, "Initializing({})", val),
+            State::Communicating(val) => write!(f, "Communicating({})", val),
+            State::Disconnecting(val) => write!(f, "Disconnecting({})", val),
             variant => write!(f, "{:?}", variant),
         }
     }
@@ -208,31 +213,37 @@ impl StateMachineImpl for LgTvStateMachine {
             (State::Connecting(_), Input::Error) => Some(State::Disconnected),
 
             // Connected
-            (State::Connected(_), Input::Pair) => Some(State::Pairing),
-            (State::Connected(_), Input::Initialize) => Some(State::Initializing),
+            (State::Connected(url), Input::Pair) => Some(State::Pairing(url.into())),
+            (State::Connected(url), Input::Initialize) => Some(State::Initializing(url.into())),
             (State::Connected(_), Input::Reset) => Some(State::Disconnected),
-            (State::Connected(_), Input::Error) => Some(State::Disconnecting),
+            (State::Connected(url), Input::Error) => Some(State::Disconnecting(url.into())),
 
             // Pairing
-            (State::Pairing, Input::Initialize) => Some(State::Initializing),
-            (State::Pairing, Input::Reset) => Some(State::Disconnected),
-            (State::Pairing, Input::Error) => Some(State::Disconnecting),
+            (State::Pairing(url), Input::Initialize) => Some(State::Initializing(url.into())),
+            (State::Pairing(_), Input::Reset) => Some(State::Disconnected),
+            (State::Pairing(url), Input::Error) => Some(State::Disconnecting(url.into())),
 
             // Initializing
-            (State::Initializing, Input::StartCommunication) => Some(State::Communicating),
-            (State::Initializing, Input::Reset) => Some(State::Disconnected),
-            (State::Initializing, Input::Error) => Some(State::Disconnecting),
+            (State::Initializing(url), Input::StartCommunication) => {
+                Some(State::Communicating(url.into()))
+            }
+            (State::Initializing(_), Input::Reset) => Some(State::Disconnected),
+            (State::Initializing(url), Input::Error) => Some(State::Disconnecting(url.into())),
 
             // Communicating
-            (State::Communicating, Input::SendCommand(_)) => Some(State::Communicating),
-            (State::Communicating, Input::Disconnect) => Some(State::Disconnecting),
-            (State::Communicating, Input::Reset) => Some(State::Disconnected),
-            (State::Communicating, Input::Error) => Some(State::Disconnecting),
+            (State::Communicating(url), Input::SendCommand(_)) => {
+                Some(State::Communicating(url.into()))
+            }
+            (State::Communicating(url), Input::Disconnect) => {
+                Some(State::Disconnecting(url.into()))
+            }
+            (State::Communicating(_), Input::Reset) => Some(State::Disconnected),
+            (State::Communicating(url), Input::Error) => Some(State::Disconnecting(url.into())),
 
             // Disconnecting
-            (State::Disconnecting, Input::DisconnectionComplete) => Some(State::Disconnected),
-            (State::Disconnecting, Input::Reset) => Some(State::Disconnected),
-            (State::Disconnecting, Input::Error) => Some(State::Disconnected),
+            (State::Disconnecting(_), Input::DisconnectionComplete) => Some(State::Disconnected),
+            (State::Disconnecting(_), Input::Reset) => Some(State::Disconnected),
+            (State::Disconnecting(_), Input::Error) => Some(State::Disconnected),
 
             _ => None,
         }
@@ -253,24 +264,24 @@ impl StateMachineImpl for LgTvStateMachine {
             (State::Connected(_), Input::Error) => Some(Output::DisconnectFromTv),
 
             // Pairing
-            (State::Pairing, Input::Initialize) => Some(Output::InitializeConnection),
-            (State::Pairing, Input::Error) => Some(Output::DisconnectFromTv),
+            (State::Pairing(_), Input::Initialize) => Some(Output::InitializeConnection),
+            (State::Pairing(_), Input::Error) => Some(Output::DisconnectFromTv),
 
             // Initializing
-            (State::Initializing, Input::Error) => Some(Output::DisconnectFromTv),
+            (State::Initializing(_), Input::Error) => Some(Output::DisconnectFromTv),
 
             // Communicating
-            (State::Communicating, Input::SendCommand(command)) => {
+            (State::Communicating(_), Input::SendCommand(command)) => {
                 Some(Output::SendCommand(command.clone()))
             }
-            (State::Communicating, Input::Disconnect) => Some(Output::DisconnectFromTv),
-            (State::Communicating, Input::Error) => Some(Output::DisconnectFromTv),
+            (State::Communicating(_), Input::Disconnect) => Some(Output::DisconnectFromTv),
+            (State::Communicating(_), Input::Error) => Some(Output::DisconnectFromTv),
 
             // Disconnecting
-            (State::Disconnecting, Input::DisconnectionComplete) => {
+            (State::Disconnecting(_), Input::DisconnectionComplete) => {
                 Some(Output::HandleSuccessfulDisconnect)
             }
-            (State::Disconnecting, Input::Error) => Some(Output::HandleConnectionError),
+            (State::Disconnecting(_), Input::Error) => Some(Output::HandleConnectionError),
 
             _ => None,
         }
@@ -372,8 +383,9 @@ async fn send_update(
 
 #[cfg(test)]
 mod tests {
-    use super::State;
     use crate::TvCommand;
+
+    use super::State;
 
     #[test]
     fn state_display() {
@@ -388,10 +400,22 @@ mod tests {
             State::Connected("wss://127.0.0.1:3001/".into()).to_string(),
             "Connected(wss://127.0.0.1:3001/)"
         );
-        assert_eq!(State::Pairing.to_string(), "Pairing");
-        assert_eq!(State::Initializing.to_string(), "Initializing");
-        assert_eq!(State::Communicating.to_string(), "Communicating");
-        assert_eq!(State::Disconnecting.to_string(), "Disconnecting");
+        assert_eq!(
+            State::Pairing("wss://127.0.0.1:3001/".into()).to_string(),
+            "Pairing(wss://127.0.0.1:3001/)"
+        );
+        assert_eq!(
+            State::Initializing("wss://127.0.0.1:3001/".into()).to_string(),
+            "Initializing(wss://127.0.0.1:3001/)"
+        );
+        assert_eq!(
+            State::Communicating("wss://127.0.0.1:3001/".into()).to_string(),
+            "Communicating(wss://127.0.0.1:3001/)"
+        );
+        assert_eq!(
+            State::Disconnecting("wss://127.0.0.1:3001/".into()).to_string(),
+            "Disconnecting(wss://127.0.0.1:3001/)"
+        );
         assert_eq!(State::Zombie.to_string(), "Zombie");
     }
 }

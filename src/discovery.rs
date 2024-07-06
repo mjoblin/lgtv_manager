@@ -8,6 +8,7 @@ use futures::prelude::*;
 use log::{error, info};
 use rupnp::ssdp::{SearchTarget, URN};
 
+const DISCOVERY_DURATION_SECS: u64 = 3;
 const MEDIA_RENDERER: URN = URN::device("schemas-upnp-org", "MediaRenderer", 1);
 
 /// A UPnP Device representation of an LG TV.
@@ -44,7 +45,7 @@ pub(crate) async fn discover_lgtv_devices() -> Result<Vec<LgTvDevice>, String> {
 
     let mut discovered_lgtv_devices: Vec<LgTvDevice> = Vec::new();
 
-    match rupnp::discover(&search_target, Duration::from_secs(3)).await {
+    match rupnp::discover(&search_target, Duration::from_secs(DISCOVERY_DURATION_SECS)).await {
         Ok(discovered_devices) => {
             pin_utils::pin_mut!(discovered_devices);
 
