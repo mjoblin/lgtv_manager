@@ -142,16 +142,18 @@ to a TV. The manager will return a `ManagerOutputMessage::Status` message for ea
 state. The flow is as follows:
 
 1. `Disconnected`
-2. `Connecting` (WebSocket URL is provided as data)
-3. `Connected` (WebSocket URL is provided as data)
+2. `Connecting`
+3. `Connected`
 4. `Pairing`
 5. `Initializing`
 6. `Communicating`
 6. `Disconnecting`
 
-Most of these can be safely ignored. It is enough to instantiate `LgTvManager`, send a
+Most states can be safely ignored. It is enough to instantiate `LgTvManager`, send a
 `ManagerMessage::Connect` message, and then wait for the manager to enter the `Communicating`
 state before sending commands.
+
+The WebSocket URL is provided as String data with most states (where applicable).
 
 See `LgTvManager` for a diagram of the state flow.
 
