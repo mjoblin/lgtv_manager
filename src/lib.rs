@@ -1042,7 +1042,15 @@ impl LgTvManager {
                 let _ = self.send_to_fsm(Input::Initialize).await;
             }
             LgTvResponse::Error(error_response) => {
+                // Pairing errors are an expected TvError, which we want to manage via the state
+                // machine. Non-pairing errors will be reported back to the caller, but are
+                // otherwise ignored.
                 error!("Received error from TV: {:?}", &error_response);
+
+                let is_pairing_error = match &error_response.error {
+                    Some(error_string) => error_string.contains("pairing"),
+                    None => false,
+                };
 
                 let _ = self
                     .send_out(ManagerOutputMessage::TvError(
@@ -1051,6 +1059,10 @@ impl LgTvManager {
                             .unwrap_or_else(|| String::from("Unknown TV error")),
                     ))
                     .await;
+
+                if is_pairing_error {
+                    let _ = self.send_to_fsm(Input::Error).await;
+                }
             }
         }
 
