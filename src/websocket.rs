@@ -9,6 +9,8 @@
 //! channel messages back to the caller when a `String` payload is received, or when there is a
 //! WebSocket status change (see [`WsStatus`]).
 
+use std::time::SystemTime;
+
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
 use tokio::net::TcpStream;
@@ -26,29 +28,34 @@ use tungstenite::Message;
 
 /// Channel message types sent from the caller to the WebSocket manager.
 ///
-/// The [`WsMessage::Command`] variant is used to send a [`WsCommand`] to the WebSocket manager.
-/// The [`WsMessage::Payload`] variant is used to send a `String` payload to the TV's WebSocket
-/// server.
+/// [`WsMessage::Command`] - Send a [`WsCommand`] to the WebSocket manager.
+/// [`WsMessage::Payload`] - Send a `String` payload to the TV's WebSocket.
+/// [`WsMessage::TestConnection`] - Test whether the WebSocket server responds to pings.
 #[derive(Debug)]
 pub(crate) enum WsMessage {
     Command(WsCommand),
     Payload(String),
+    TestConnection,
 }
 
 /// Channel message types sent from the WebSocket manager back to the caller.
 ///
-/// The [`WsUpdateMessage::Status`] variant is used to send WebSocket status information
-/// ([`WsStatus`]) back to the caller. The [`WsUpdateMessage::Payload`] variant is used to send
-/// `String` payloads received from the WebSocket server back to the caller.
+/// [`WsUpdateMessage::Status`] - Send WebSocket status information ([`WsStatus`]) back to the
+/// caller.
+/// [`WsUpdateMessage::Payload`] - Send `String` payloads received from the WebSocket server back
+/// to the caller.
+/// [`WsUpdateMessage::IsConnectionOk`] - Send a connection test result to the caller.
 #[derive(Debug)]
 pub(crate) enum WsUpdateMessage {
     Status(WsStatus),
     Payload(String),
+    IsConnectionOk(bool),
 }
 
 // ------------------------------------------------------------------------------------------------
 
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
+const TEST_CONNECTION_DURATION: Duration = Duration::from_millis(1500);
 
 #[derive(Debug)]
 pub(crate) enum WsCommand {
@@ -60,7 +67,9 @@ pub(crate) enum WsStatus {
     Idle,
     Connected,
     Disconnected,
-    Error(String),
+    ConnectError(String),
+    MessageReadError(String),
+    ServerClosedConnection,
 }
 
 // ================================================================================================
@@ -87,7 +96,7 @@ impl LgTvWebSocket {
     /// Non-payload information is passed back to the caller via `WsUpdateMessage::Status`
     /// messages.
     pub fn start(
-        &self,
+        &mut self,
         host: &str,
         use_tls: bool,
         mut rx: Receiver<WsMessage>,
@@ -110,7 +119,7 @@ impl LgTvWebSocket {
                     error!("{e}");
                     let _ = LgTvWebSocket::send_update(
                         &tx,
-                        WsUpdateMessage::Status(WsStatus::Error(e)),
+                        WsUpdateMessage::Status(WsStatus::ConnectError(e)),
                     )
                     .await;
 
@@ -126,6 +135,11 @@ impl LgTvWebSocket {
             }
 
             let (mut ws_write, mut ws_read) = ws_stream.split();
+
+            // Configure an interval which will always be checked regardless of whether there's any
+            // items waiting in a channel for processing.
+            let mut interval = tokio::time::interval(Duration::from_secs(1));
+            let mut connection_test_start: Option<SystemTime> = None;
 
             // Loop forever, reading messages from the caller and the WebSocket.
 
@@ -161,6 +175,20 @@ impl LgTvWebSocket {
                                         break;
                                     }
                                 }
+                                WsMessage::TestConnection => {
+                                    if connection_test_start.is_some() {
+                                        warn!("Connection test already in progress");
+                                    } else {
+                                        info!("Initiating connection test");
+
+                                        if let Err(e) = ws_write.send(Message::Ping(vec!())).await {
+                                            error!("Failed to send WebSocket ping while testing connection: {:?}", e);
+                                            break;
+                                        }
+
+                                        connection_test_start = Some(SystemTime::now());
+                                    }
+                                }
                             },
                             None => {
                                 warn!("WebSocket caller receive channel closed");
@@ -193,12 +221,23 @@ impl LgTvWebSocket {
                                 }
                                 Message::Pong(_) => {
                                     debug!("WebSocket Pong");
+
+                                    // A pong received while testing the connection means the
+                                    // connection test passed
+                                    if connection_test_start.is_some() {
+                                        connection_test_start = None;
+
+                                        let _ = LgTvWebSocket::send_update(
+                                            &tx,
+                                            WsUpdateMessage::IsConnectionOk(true)
+                                        ).await;
+                                    }
                                 }
                                 Message::Close(_) => {
                                     warn!("WebSocket received server close");
                                     let _ = LgTvWebSocket::send_update(
                                         &tx,
-                                        WsUpdateMessage::Status(WsStatus::Error("Server closed connection".into()))
+                                        WsUpdateMessage::Status(WsStatus::ServerClosedConnection)
                                     ).await;
 
                                     break;
@@ -211,11 +250,34 @@ impl LgTvWebSocket {
                                 error!("WebSocket message read error: {:?}", &e);
                                 let _ = LgTvWebSocket::send_update(
                                     &tx,
-                                    WsUpdateMessage::Status(WsStatus::Error(format!("{e}")))
+                                    WsUpdateMessage::Status(WsStatus::MessageReadError(format!("{e}")))
                                 ).await;
 
                                 break;
                             }
+                        }
+                    }
+
+                    // Do some checks every interval, regardless of incoming messages.
+                    _ = interval.tick() => {
+                        match connection_test_start {
+                            Some(connection_test_start) => {
+                                // A connection test is in progress. If a pong has not been received
+                                // in time then the test has failed.
+                                let now = SystemTime::now();
+
+                                if let Ok(duration_since_test_start) = now.duration_since(connection_test_start) {
+                                    if duration_since_test_start > TEST_CONNECTION_DURATION {
+                                        warn!("Connection test failed (pong timeout)");
+
+                                        let _ = LgTvWebSocket::send_update(
+                                            &tx,
+                                            WsUpdateMessage::IsConnectionOk(false)
+                                        ).await;
+                                    }
+                                }
+                            },
+                            None => {},
                         }
                     }
                 }

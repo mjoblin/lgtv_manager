@@ -53,6 +53,12 @@ pub enum State {
     Communicating(String),
     /// Disconnecting from the TV at the provided url.
     Disconnecting(String),
+    /// Attempting a reconnect to the provided url in the given number of seconds.
+    // This is a faked state of sorts. The state machine never technically enters this state, but
+    // the LgTvManager manages the reconnecting state manually and wants to inform callers about
+    // the reconnect status. This is hacky.
+    // TODO: Can the reconnect state be formally handled by the state machine in a clean manner.
+    Reconnecting(String, u64),
     /// An unrecoverable problem has occurred. The Manager is unresponsive and will only respond
     /// (at best) to `ManagerMessage::ShutDown` requests.
     // Cannot be transitioned into or out of. This state exists only so the LgTvManager can inform
@@ -98,7 +104,8 @@ pub(crate) enum Output {
     InitializeConnection,
     SendCommand(TvCommand),
     DisconnectFromTv,
-    HandleConnectionError,
+    HandleConnectError,
+    HandleDisconnectError,
     HandleSuccessfulDisconnect,
 }
 
@@ -120,7 +127,7 @@ pub(crate) enum Output {
 //
 //     Connecting => {
 //         AttemptRegister => Connected [SendRegisterPayload],
-//         Error => Disconnected [HandleConnectionError],
+//         Error => Disconnected [HandleConnectError],
 //         BecomeZombie => Zombie [HandleBecomingAZombie],
 //     }
 //
@@ -152,7 +159,7 @@ pub(crate) enum Output {
 //
 //     Disconnecting => {
 //         DisconnectionComplete => Disconnected [HandleSuccessfulDisconnect],
-//         Error => Disconnected [HandleConnectionError],
+//         Error => Disconnected [HandleDisconnectError],
 //         BecomeZombie => Zombie [HandleBecomingAZombie],
 //     },
 // }
@@ -256,7 +263,7 @@ impl StateMachineImpl for LgTvStateMachine {
 
             // Connecting
             (State::Connecting(_), Input::AttemptRegister) => Some(Output::SendRegisterPayload),
-            (State::Connecting(_), Input::Error) => Some(Output::HandleConnectionError),
+            (State::Connecting(_), Input::Error) => Some(Output::HandleConnectError),
 
             // Connected
             (State::Connected(_), Input::Pair) => Some(Output::PairWithTv),
@@ -281,7 +288,7 @@ impl StateMachineImpl for LgTvStateMachine {
             (State::Disconnecting(_), Input::DisconnectionComplete) => {
                 Some(Output::HandleSuccessfulDisconnect)
             }
-            (State::Disconnecting(_), Input::Error) => Some(Output::HandleConnectionError),
+            (State::Disconnecting(_), Input::Error) => Some(Output::HandleDisconnectError),
 
             _ => None,
         }

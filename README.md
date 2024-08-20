@@ -37,7 +37,7 @@ cargo run --example control
 cargo run --example discover
 ```
 
-#### Note
+### Asynchronous
 
 Communication with `LgTvManager` is asynchronous. Commands are invoked on the TV by sending a
 `ManagerMessage` to the manager. There is no guarantee that the manager will send an associated
@@ -52,6 +52,7 @@ Most use cases will rely on sending `ManagerMessage::SendTvCommand` messages to 
 and processing any received `ManagerOutputMessage::TvState` messages. This asynchronous pattern
 may not always be desirable. It would be possible to extend `LgTvManager` to support associating
 commands with responses via a message ID.
+
 ### Common usage flow
 
 1. **Discover** LG TVs on the network using UPnP discovery.
@@ -104,7 +105,11 @@ let (to_manager, to_manager_rx) = mpsc::channel(32);
 to_manager
     .send(Connect(Connection::Host(
         "10.0.0.101".into(),
-        ConnectionSettingsBuilder::new().with_forced_pairing().build(),
+        ConnectionSettingsBuilder::new()
+            .with_forced_pairing()
+            .with_initial_connect_retries()
+            .with_auto_reconnect()
+            .build(),
     )))
     .await;
 ```
@@ -157,6 +162,29 @@ The WebSocket URL is provided as String data with most states (where applicable)
 
 See `LgTvManager` for a diagram of the state flow.
 
+#### Reconnecting
+
+When the TV closes the connection (e.g. after the TV enters standby), the manager reverts to its
+default `Disconnected` state. This behavior can be overridden with
+`ConnectionSettingsBuilder::with_auto_reconnect()`.
+
+When auto reconnect is enabled, the manager will attempt to reestablish a lost connection. Each
+reconnect is attempted after a 5s delay. The manager can be instructed to stop attempting
+reconnects by sending `ManagerMessage::CancelReconnect`.
+
+The manager will emit `ManagerOutputMessage::IsReconnectFlowActive` messages to indicate the
+start and end of the reconnect flow. This is distinct from the manager state, which will continue
+to cycle through the normal connect phases when attempting to reconnect. The reconnect flow will
+end either upon successful connection, or when cancelled with `ManagerMessage::CancelReconnect`.
+
+#### Retrying initial connections
+
+When connecting to a TV for the first time during a single manager session, the initial connection
+might fail. This is likely to happen when the TV is turned off or in standby mode. This initial
+connection can be optionally retried with
+`ConnectionSettingsBuilder::with_initial_connect_retries()`. The retry behavior is the same as
+for closed-connection reconnects.
+
 ### Sending LG commands
 
 Once a successful connection has been established and the manager has returned
@@ -168,6 +196,12 @@ Commands are sent using `ManagerMessage::SendTvCommand`. Supported commands can 
 It is expected that the most common commands to send to the TV will be those that change the TV's
 state (such as `SetMute`, `VolumeUp`, etc). Any changes to the TV's state will be received via
 `TvState` updates from the manager, so invoking the "get" commands is usually not necessary.
+
+### Testing the connection
+
+The current validity of a TV connection can be tested using `ManagerMessage::TestConnection`.
+The manager will respond with a boolean `ManagerOutputMessage::IsConnectionOk`. For a connection
+to be valid, the TV must successfully respond to a ping over the existing WebSocket connection.
 
 ### Disconnecting
 
@@ -206,12 +240,14 @@ use env_logger;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
 
-use lgtv_manager::ManagerMessage::{Connect, Disconnect, SendTvCommand, ShutDown};
-use lgtv_manager::ManagerStatus::Disconnected;
 use lgtv_manager::{
     Connection, ConnectionSettings, LgTvManager, ManagerOutputMessage,
     TvCommand::{VolumeDown, VolumeUp},
 };
+use lgtv_manager::ManagerMessage::{
+    Connect, Disconnect, SendTvCommand, ShutDown, TestConnection,
+};
+use lgtv_manager::ManagerStatus::Disconnected;
 
 #[tokio::main]
 async fn main() -> Result<(), ()> {
@@ -238,8 +274,9 @@ async fn main() -> Result<(), ()> {
                     println!("\n>>> Manager is disconnected and ready to receive messages");
                     println!(">>> SEND CONNECT ('c') COMMAND FIRST; TV IP MUST BE VALID");
                     println!(concat!(
-                        ">>> Enter command: c (connect), u (volume up), d (volume down), ",
-                        "i (disconnect), s (shut down)\n"
+                        ">>> Enter command:\n",
+                        ">>>    c (connect), u (volume up), d (volume down)\n",
+                        ">>>    t (test connection), i (disconnect), s (shut down)\n"
                     ));
                 }
             }
@@ -285,6 +322,12 @@ async fn main() -> Result<(), ()> {
                 "d" => {
                     to_manager_clone
                         .send(SendTvCommand(VolumeDown))
+                        .await
+                        .map_err(|_| ())?;
+                }
+                "t" => {
+                    to_manager_clone
+                        .send(TestConnection)
                         .await
                         .map_err(|_| ())?;
                 }

@@ -36,7 +36,7 @@ cargo run --example control
 cargo run --example discover
 ```
 
-### Note
+## Asynchronous
 
 Communication with `LgTvManager` is asynchronous. Commands are invoked on the TV by sending a
 [`ManagerMessage`] to the manager. There is no guarantee that the manager will send an associated
@@ -51,6 +51,7 @@ Most use cases will rely on sending [`ManagerMessage::SendTvCommand`] messages t
 and processing any received [`ManagerOutputMessage::TvState`] messages. This asynchronous pattern
 may not always be desirable. It would be possible to extend `LgTvManager` to support associating
 commands with responses via a message ID.
+
 ## Common usage flow
 
 1. **Discover** LG TVs on the network using UPnP discovery.
@@ -105,7 +106,11 @@ let (to_manager, to_manager_rx) = mpsc::channel(32);
 to_manager
     .send(Connect(Connection::Host(
         "10.0.0.101".into(),
-        ConnectionSettingsBuilder::new().with_forced_pairing().build(),
+        ConnectionSettingsBuilder::new()
+            .with_forced_pairing()
+            .with_initial_connect_retries()
+            .with_auto_reconnect()
+            .build(),
     )))
     .await;
 # }
@@ -159,6 +164,29 @@ The WebSocket URL is provided as String data with most states (where applicable)
 
 See [`LgTvManager`] for a diagram of the state flow.
 
+### Reconnecting
+
+When the TV closes the connection (e.g. after the TV enters standby), the manager reverts to its
+default `Disconnected` state. This behavior can be overridden with
+[`ConnectionSettingsBuilder::with_auto_reconnect()`].
+
+When auto reconnect is enabled, the manager will attempt to reestablish a lost connection. Each
+reconnect is attempted after a 5s delay. The manager can be instructed to stop attempting
+reconnects by sending [`ManagerMessage::CancelReconnect`].
+
+The manager will emit [`ManagerOutputMessage::IsReconnectFlowActive`] messages to indicate the
+start and end of the reconnect flow. This is distinct from the manager state, which will continue
+to cycle through the normal connect phases when attempting to reconnect. The reconnect flow will
+end either upon successful connection, or when cancelled with [`ManagerMessage::CancelReconnect`].
+
+### Retrying initial connections
+
+When connecting to a TV for the first time during a single manager session, the initial connection
+might fail. This is likely to happen when the TV is turned off or in standby mode. This initial
+connection can be optionally retried with
+[`ConnectionSettingsBuilder::with_initial_connect_retries()`]. The retry behavior is the same as
+for closed-connection reconnects.
+
 ## Sending LG commands
 
 Once a successful connection has been established and the manager has returned
@@ -170,6 +198,12 @@ Commands are sent using [`ManagerMessage::SendTvCommand`]. Supported commands ca
 It is expected that the most common commands to send to the TV will be those that change the TV's
 state (such as `SetMute`, `VolumeUp`, etc). Any changes to the TV's state will be received via
 `TvState` updates from the manager, so invoking the "get" commands is usually not necessary.
+
+## Testing the connection
+
+The current validity of a TV connection can be tested using [`ManagerMessage::TestConnection`].
+The manager will respond with a boolean [`ManagerOutputMessage::IsConnectionOk`]. For a connection
+to be valid, the TV must successfully respond to a ping over the existing WebSocket connection.
 
 ## Disconnecting
 
@@ -208,12 +242,14 @@ use env_logger;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
 
-use lgtv_manager::ManagerMessage::{Connect, Disconnect, SendTvCommand, ShutDown};
-use lgtv_manager::ManagerStatus::Disconnected;
 use lgtv_manager::{
     Connection, ConnectionSettings, LgTvManager, ManagerOutputMessage,
     TvCommand::{VolumeDown, VolumeUp},
 };
+use lgtv_manager::ManagerMessage::{
+    Connect, Disconnect, SendTvCommand, ShutDown, TestConnection,
+};
+use lgtv_manager::ManagerStatus::Disconnected;
 
 #[tokio::main]
 async fn main() -> Result<(), ()> {
@@ -240,8 +276,9 @@ async fn main() -> Result<(), ()> {
                     println!("\n>>> Manager is disconnected and ready to receive messages");
                     println!(">>> SEND CONNECT ('c') COMMAND FIRST; TV IP MUST BE VALID");
                     println!(concat!(
-                        ">>> Enter command: c (connect), u (volume up), d (volume down), ",
-                        "i (disconnect), s (shut down)\n"
+                        ">>> Enter command:\n",
+                        ">>>    c (connect), u (volume up), d (volume down)\n",
+                        ">>>    t (test connection), i (disconnect), s (shut down)\n"
                     ));
                 }
             }
@@ -287,6 +324,12 @@ async fn main() -> Result<(), ()> {
                 "d" => {
                     to_manager_clone
                         .send(SendTvCommand(VolumeDown))
+                        .await
+                        .map_err(|_| ())?;
+                }
+                "t" => {
+                    to_manager_clone
+                        .send(TestConnection)
                         .await
                         .map_err(|_| ())?;
                 }
@@ -368,7 +411,34 @@ async fn main() -> Result<(), ()> {
     Ok(())
 }
 ```
-*/
+ */
+
+use std::cmp::PartialEq;
+use std::path::PathBuf;
+use std::time::SystemTime;
+
+use log::{debug, error, info, warn};
+use tokio::select;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::task::JoinHandle;
+use tokio::time;
+use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
+
+pub use commands::TvCommand;
+pub use connection_settings::{Connection, ConnectionSettings, ConnectionSettingsBuilder};
+use discovery::discover_lgtv_devices;
+pub use discovery::LgTvDevice;
+use helpers::{generate_lgtv_message_id, generate_register_request, websocket_url_for_connection};
+pub use messages::{CurrentSwInfoPayload as TvSoftwareInfo, ExternalInput as TvInput};
+use messages::{LgTvResponse, LgTvResponsePayload};
+use state::{read_persisted_state, write_persisted_state, PersistedState};
+pub use state::{LastSeenTv, TvInfo, TvState};
+pub use state_machine::State as ManagerStatus;
+use state_machine::{start_state_machine, Input, Output, StateMachineUpdateMessage};
+use websocket::{LgTvWebSocket, WsCommand, WsMessage, WsStatus, WsUpdateMessage};
+
+use crate::state_machine::State;
 
 mod commands;
 mod connection_settings;
@@ -379,37 +449,15 @@ mod state;
 mod state_machine;
 mod websocket;
 
-use std::path::PathBuf;
-
-use log::{debug, error, info, warn};
-use tokio::select;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
-use tokio_util::task::TaskTracker;
-
-use crate::state_machine::State;
-pub use commands::TvCommand;
-pub use connection_settings::{Connection, ConnectionSettings, ConnectionSettingsBuilder};
-use discovery::discover_lgtv_devices;
-pub use discovery::LgTvDevice;
-use helpers::{
-    device_host, generate_lgtv_message_id, generate_possible_websocket_url,
-    generate_register_request,
-};
-pub use messages::{CurrentSwInfoPayload as TvSoftwareInfo, ExternalInput as TvInput};
-use messages::{LgTvResponse, LgTvResponsePayload};
-use state::{read_persisted_state, write_persisted_state, PersistedState};
-pub use state::{LastSeenTv, TvInfo, TvState};
-pub use state_machine::State as ManagerStatus;
-use state_machine::{start_state_machine, Input, Output, StateMachineUpdateMessage};
-use websocket::{LgTvWebSocket, WsCommand, WsMessage, WsStatus, WsUpdateMessage};
-
 // CHANNEL MESSAGES -------------------------------------------------------------------------------
 
 /// Messages sent from the caller to the [`LgTvManager`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum ManagerMessage {
+    /// Stop attempting to reconnect to the TV. Only relevant if the connection has been closed
+    /// by the TV (usually because it entered standby) and the `ConnectionSettings` have
+    /// `auto_reconnect` enabled. Cancellation takes effect after the current retry cycle.
+    CancelReconnect,
     /// Connect to an LG TV using either a host/IP or a UPnP device.
     Connect(Connection),
     /// Disconnect from the TV.
@@ -423,6 +471,9 @@ pub enum ManagerMessage {
     SendTvCommand(TvCommand),
     /// Shut down the [`LgTvManager`]. Disconnects from the TV and stops the manager task.
     ShutDown,
+    /// Test the connection to the TV. The manager will respond with
+    /// [`ManagerOutputMessage::IsConnectionOk`].
+    TestConnection,
 }
 
 /// Messages sent from the [`LgTvManager`] back to the caller.
@@ -432,6 +483,12 @@ pub enum ManagerOutputMessage {
     DiscoveredDevices(Vec<LgTvDevice>),
     /// An [`LgTvManager`] error occurred.
     Error(ManagerError),
+    /// Is the connection to the TV OK. Sent in response to a [`ManagerMessage::TestConnection`].
+    IsConnectionOk(bool),
+    /// Is the manager's reconnect flow active. The reconnect flow status exists separately from
+    /// the manager status. While the reconnect flow is active, the manager's status will still
+    /// cycle through its normal connect phases (`Connecting`, `Connected`, etc).
+    IsReconnectFlowActive(bool),
     /// Is UPnP discovery being performed.
     IsDiscovering(bool),
     /// Information on the TV last connected to by the Manager. Connection may have been
@@ -556,6 +613,13 @@ impl LgTvManagerBuilder {
 //  - If anything unrecoverable happens, then the manager enters the Zombie state and can no
 //    longer do anything useful.
 
+#[derive(Debug, PartialEq)]
+enum ReconnectFlowStatus {
+    Active,
+    Cancelled,
+    Inactive,
+}
+
 /// Manage a connection to an LG TV.
 ///
 /// The interface to `LgTvManager` (after instantiation with [`LgTvManager::new()`] and running
@@ -566,7 +630,7 @@ impl LgTvManagerBuilder {
 /// here only to provide context for how `LgTvManager` operates, and to give more detail for
 /// [`ManagerStatus`]. (The `Zombie` state is omitted for brevity). Detailed awareness of the state
 /// machine is not required to use the manager.
-#[doc=include_str!("../resources/lgtvmanager_state_machine.svg")]
+#[doc = include_str!("../resources/lgtvmanager_state_machine.svg")]
 pub struct LgTvManager {
     // General manager state
     manager_status: ManagerStatus, // LgTvManager manager_status is just the state machine state
@@ -576,7 +640,9 @@ pub struct LgTvManager {
     tv_state: TvState,
     client_key: Option<String>, // Unique LG client key, provided by the TV after pairing
     connection_details: Option<Connection>, // LgTvManager only handles up to 1 connection at a time
-    connection_initialized: bool, // TV connection has been made and initial setup commands are sent
+    is_connection_initialized: bool, // TV connection has been made and initial setup commands are sent
+    reconnect_flow_status: ReconnectFlowStatus,
+    session_connection_count: u64,
 
     // Manager in/out channels
     command_rx: Receiver<ManagerMessage>, // Receives ManagerMessage from the caller
@@ -635,7 +701,9 @@ impl LgTvManager {
             tv_state: TvState::default(),
             client_key: None,
             connection_details: None,
-            connection_initialized: false,
+            is_connection_initialized: false,
+            reconnect_flow_status: ReconnectFlowStatus::Inactive,
+            session_connection_count: 0,
             command_rx,
             output_tx,
             to_fsm_tx: None,
@@ -688,11 +756,20 @@ impl LgTvManager {
 
         self.initialize_manager_state().await;
         self.emit_manager_status().await;
+        self.set_reconnect_flow_status(ReconnectFlowStatus::Inactive).await;
 
         info!("Manager ready to receive commands (send a Connect command first if desired)");
 
         // Note: An inability to send messages to the state machine is considered fatal and will
         //  result in exiting the loop.
+
+        // Note on retries: Retries are optionally supported for both the initial connection
+        //  (ManagerMessage::Connect) and lost connections (WsStatus::ServerClosedConnection). In
+        //  both cases, ReconnectStatus::Active is enabled which will result in an infinite retry
+        //  loop (resetting the manager and trying again to connect) until either: a successful
+        //  connection is achieved (identified by being asked to send a register payload via
+        //  Output::SendRegisterPayload); or the retry loop is cancelled by the caller
+        //  (ManagerMessage::CancelReconnect).
 
         loop {
             select! {
@@ -702,6 +779,14 @@ impl LgTvManager {
 
                 Some(manager_msg) = self.command_rx.recv() => {
                     match manager_msg {
+                        ManagerMessage::CancelReconnect => {
+                            if self.reconnect_flow_status == ReconnectFlowStatus::Active {
+                                info!("Disabling reconnects");
+                                self.set_reconnect_flow_status(ReconnectFlowStatus::Cancelled).await;
+                            } else {
+                                warn!("Cannot disable reconnects while manager is not attempting to reconnect");
+                            }
+                        }
                         ManagerMessage::Connect(connection) => {
                             if let Err(e) = self.initiate_connect_to_tv(connection).await {
                                 let _ = self.send_out(ManagerOutputMessage::Error(ManagerError::Connection(e))).await;
@@ -717,6 +802,16 @@ impl LgTvManager {
                             self.emit_manager_status().await;
                             self.emit_all_tv_details().await;
                         }
+                        ManagerMessage::TestConnection => {
+                            // There is no state machine state for testing the connection. If the
+                            // connection test passes then the state machine is unchanged; otherwise
+                            // the test failure will trigger an Error input to the state machine.
+                            if self.is_connection_initialized {
+                                let _ = self.send_to_ws(WsMessage::TestConnection).await;
+                            } else {
+                                warn!("Cannot test connection while not connected");
+                            }
+                        },
                         ManagerMessage::SendTvCommand(lgtv_command) => {
                             let _ = self.send_to_fsm(Input::SendCommand(lgtv_command)).await;
                         },
@@ -748,6 +843,11 @@ impl LgTvManager {
                                 self.start_websocket_handler_and_connect(&host).await;
                             },
                             Output::SendRegisterPayload => {
+                                // If we got this far then we've connected to the TV, so no need to
+                                // remain in a possible reconnecting phase.
+                                self.set_reconnect_flow_status(ReconnectFlowStatus::Inactive).await;
+                                self.session_connection_count += 1;
+
                                 let _ = self.send_register_payload().await;
                             },
                             Output::PairWithTv => {
@@ -768,8 +868,20 @@ impl LgTvManager {
                                 // A clean WebSocket disconnect has taken place
                                 self.handle_successful_disconnect().await;
                             },
-                            Output::HandleConnectionError => {
-                                self.force_manager_reset("A WebSocket error occurred").await;
+                            Output::HandleConnectError => {
+                                self.force_manager_reset("A WebSocket connection error occurred").await;
+
+                                if self.should_retry_connect_failure() {
+                                    match self.reconnect_flow_status {
+                                        ReconnectFlowStatus::Active => self.initiate_reconnect().await,
+                                        ReconnectFlowStatus::Cancelled =>
+                                            self.set_reconnect_flow_status(ReconnectFlowStatus::Inactive).await,
+                                        ReconnectFlowStatus::Inactive => {},
+                                    }
+                                }
+                            },
+                            Output::HandleDisconnectError => {
+                                self.force_manager_reset("A WebSocket disconnection error occurred").await;
                             }
                         }
                         StateMachineUpdateMessage::TransitionError(error) => {
@@ -781,8 +893,10 @@ impl LgTvManager {
 
                 // FROM THE WEBSOCKET -------------------------------------------------------------
 
-                // NOTE: An Error from the WebSocket client is treated as a fatal error which will
-                //  result in the LgTvManager reverting a Disconnected state.
+                // NOTE: An Error from the WebSocket client is treated as a fatal error for the
+                //  active connection, which will result in the LgTvManager reverting to a
+                //  Disconnected state. These errors can optionally result in the initiation of a
+                //  reconnect.
 
                 ws_message = async {
                     self.from_ws_rx.as_mut().expect("WebSocket handler crash").recv().await
@@ -800,11 +914,27 @@ impl LgTvManager {
                                         info!("WebSocket has disconnected from TV");
                                         let _ = self.send_to_fsm(Input::DisconnectionComplete).await;
                                     }
-                                    WsStatus::Error(error) => {
-                                        let msg = format!("WebSocket error: {:?}", &error);
-                                        error!("{}", &msg);
+                                    WsStatus::ConnectError(error) => {
+                                        let msg = format!("WebSocket connect error: {:?}", &error);
+                                        warn!("{}", &msg);
+
+                                        self.optionally_prepare_for_reconnect().await;
                                         self.attempt_fsm_error(ManagerError::Connection(msg)).await;
-                                    }
+                                    },
+                                    WsStatus::MessageReadError(error) => {
+                                        let msg = format!("WebSocket message read error: {:?}", &error);
+                                        warn!("{}", &msg);
+
+                                        self.optionally_prepare_for_reconnect().await;
+                                        self.attempt_fsm_error(ManagerError::Connection(msg)).await;
+                                    },
+                                    WsStatus::ServerClosedConnection => {
+                                        let msg = "Server closed connection";
+                                        warn!("{}", &msg);
+
+                                        self.optionally_prepare_for_reconnect().await;
+                                        self.attempt_fsm_error(ManagerError::Connection(msg.into())).await;
+                                    },
                                 }
                             },
                             WsUpdateMessage::Payload(ws_payload) => {
@@ -829,6 +959,17 @@ impl LgTvManager {
                                     }
                                 }
                             },
+                            WsUpdateMessage::IsConnectionOk(is_ok) => {
+                                let _ = self.send_out(ManagerOutputMessage::IsConnectionOk(is_ok)).await;
+
+                                if is_ok {
+                                    info!("Connection test passed");
+                                } else {
+                                    let msg = "Connection test failed";
+                                    warn!("{}", &msg);
+                                    self.attempt_fsm_error(ManagerError::Connection(msg.into())).await;
+                                }
+                            }
                         }
                     }
                 }
@@ -890,9 +1031,15 @@ impl LgTvManager {
         self.tv_inputs = None;
         self.tv_software_info = None;
         self.tv_state = TvState::default();
-        self.connection_details = None;
-        self.connection_initialized = false;
-        self.ws_url = None;
+        self.is_connection_initialized = false;
+
+        // If we're in a reconnect flow then we need to retain some state for later use, otherwise
+        // it can be reset.
+        if self.reconnect_flow_status != ReconnectFlowStatus::Active {
+            self.connection_details = None;
+            self.ws_url = None;
+            self.session_connection_count = 0;
+        }
 
         self.read_persisted_state();
         self.emit_all_tv_details().await;
@@ -905,6 +1052,52 @@ impl LgTvManager {
         self.emit_tv_inputs().await;
         self.emit_tv_software_info().await;
         self.emit_tv_state().await;
+    }
+
+    /// Are initial connect retries enabled for the current `Connection`.
+    fn is_initial_connect_retries_enabled(&self) -> bool {
+        if let Some(connection) = &self.connection_details {
+            return match &connection {
+                Connection::Host(_, settings) => settings.initial_connect_retries,
+                Connection::Device(_, settings) => settings.initial_connect_retries,
+            };
+        }
+
+        false
+    }
+
+    /// Are auto-reconnects enabled for the current `Connection`.
+    fn is_auto_reconnect_enabled(&self) -> bool {
+        if let Some(connection) = &self.connection_details {
+            return match &connection {
+                Connection::Host(_, settings) => settings.auto_reconnect,
+                Connection::Device(_, settings) => settings.auto_reconnect,
+            };
+        }
+
+        false
+    }
+
+    /// Prepare the manager for a new reconnect cycle if reconnects are enabled.
+    ///
+    /// The reconnect flow won't begin until the state machine reaches the Disconnected state.
+    async fn optionally_prepare_for_reconnect(&mut self) {
+        self.set_reconnect_flow_status(
+            match self.is_auto_reconnect_enabled() {
+                true => ReconnectFlowStatus::Active,
+                false => ReconnectFlowStatus::Inactive,
+            }).await;
+    }
+
+    /// Should a connect failure be retried.
+    fn should_retry_connect_failure(&self) -> bool {
+        if self.is_initial_connect_retries_enabled() && self.session_connection_count == 0 {
+            return true;
+        } else if self.is_auto_reconnect_enabled() && self.session_connection_count > 0 {
+            return true;
+        }
+
+        false
     }
 
     /// Discover LG TVs on the local network using UPnP discovery.
@@ -996,10 +1189,10 @@ impl LgTvManager {
                         // TODO: If initialization needs to be more precise, consider storing the
                         //  initialization request IDs and detecting when all responses with the
                         //  same IDs have been received.
-                        if !self.connection_initialized {
+                        if !self.is_connection_initialized {
                             info!("TV connection initialized");
                             let _ = self.send_to_fsm(Input::StartCommunication).await;
-                            self.connection_initialized = true;
+                            self.is_connection_initialized = true;
                             info!("Manager ready to send commands to TV");
                         }
 
@@ -1094,29 +1287,18 @@ impl LgTvManager {
                 &self.manager_status
             ))
         } else {
-            // Determine the WebSocket URL to connect to
-            let tv_url = match &connection {
-                Connection::Host(host, _) => host.clone(),
-                Connection::Device(device, _) => match device_host(device) {
-                    Ok(host) => host.clone(),
-                    Err(e) => {
-                        return Err(e);
-                    }
-                },
-            };
-
-            // Initiate the connection. This will provide the Connect input to the FSM. The FSM
-            // will then take care of entering the Connecting state which will then drive the
-            // actual connection to the WebSocket server.
-            let is_tls = match &connection {
-                Connection::Host(_, settings) => settings.is_tls,
-                Connection::Device(_, settings) => settings.is_tls,
-            };
-
             if self.to_fsm_tx.is_some() {
-                match generate_possible_websocket_url(&tv_url, is_tls) {
+                match websocket_url_for_connection(&connection) {
                     Ok(url) => {
                         self.connection_details = Some(connection);
+
+                        self.set_reconnect_flow_status(
+                            match self.is_initial_connect_retries_enabled() {
+                                true => ReconnectFlowStatus::Active,
+                                false => ReconnectFlowStatus::Inactive,
+                            }
+                        ).await;
+
                         let _ = self.send_to_fsm(Input::Connect(url.clone())).await;
                         self.ws_url = Some(url);
 
@@ -1140,7 +1322,7 @@ impl LgTvManager {
         self.to_ws_tx = Some(to_ws_tx.clone());
         self.from_ws_rx = Some(from_ws_rx);
 
-        let ws_handler = LgTvWebSocket::new();
+        let mut ws_handler = LgTvWebSocket::new();
 
         info!(
             "Starting WebSocket handler; connection details: {:?}",
@@ -1248,6 +1430,75 @@ impl LgTvManager {
         }
 
         self.initialize_manager_state().await;
+
+        // A lost connection, once detected, still triggers the standard disconnect flow -- so if
+        // we end up here handling a successful disconnect then we may want to trigger a reconnect.
+        if self.reconnect_flow_status == ReconnectFlowStatus::Active {
+            self.initiate_reconnect().await;
+        }
+    }
+
+    /// Initiate a TV reconnect flow.
+    ///
+    /// Waits for the reconnect interval to pass. While waiting, it emits a
+    /// `ManagerStatus::Reconnecting` message to the caller once per second. Once the reconnect
+    /// interval has passed, it initiates a conventional Connect flow using the previously-provided
+    /// `Connection` details.
+    async fn initiate_reconnect(&mut self) {
+        let url = match &self.ws_url {
+            Some(url) => url.clone(),
+            None => {
+                self.set_reconnect_flow_status(ReconnectFlowStatus::Inactive).await;
+                self.force_manager_reset(
+                    "Unable to initiate reconnect: cannot determine URL to re-connect to",
+                )
+                .await;
+
+                return;
+            }
+        };
+
+        if let Some(connection_details) = &self.connection_details {
+            let reconnect_start_time = SystemTime::now();
+            let retry_interval = 5;
+            let mut feedback_interval = time::interval(time::Duration::from_secs(1));
+            feedback_interval.tick().await;
+
+            info!("Will attempt reconnect in {retry_interval}s");
+
+            loop {
+                let now = SystemTime::now();
+
+                if let Ok(elapsed_duration) = now.duration_since(reconnect_start_time) {
+                    if elapsed_duration.as_secs() >= retry_interval {
+                        break;
+                    }
+
+                    let time_to_retry = retry_interval - elapsed_duration.as_secs();
+                    debug!("Time to retry: {time_to_retry}s, {:?}", &connection_details);
+
+                    let _ = self
+                        .send_out(ManagerOutputMessage::Status(ManagerStatus::Reconnecting(
+                            url.clone(),
+                            time_to_retry,
+                        )))
+                        .await;
+
+                    feedback_interval.tick().await;
+                }
+            }
+
+            info!("Attempting reconnect to TV: {}", &url);
+
+            if let Err(e) = self
+                .initiate_connect_to_tv(connection_details.clone())
+                .await
+            {
+                let _ = self
+                    .send_out(ManagerOutputMessage::Error(ManagerError::Connection(e)))
+                    .await;
+            }
+        }
     }
 
     /// Ask the state machine to begins its Error flow.
@@ -1328,15 +1579,17 @@ impl LgTvManager {
     /// Send a `WsMessage` to the WebSocket handler.
     ///
     /// Not being able to send the message is treated as a non-fatal error. In theory this should
-    /// never occur, but if the manager can't send to the WebSocket manager then it attempts to
-    /// reset itself.
+    /// never occur, but if the manager can't send messages to the WebSocket manager then it
+    /// attempts to reset itself.
     async fn send_to_ws(&mut self, message: WsMessage) -> Result<(), ()> {
         match &self.to_ws_tx {
             Some(to_ws_tx) => match to_ws_tx.send(message).await {
                 Ok(_) => Ok(()),
                 Err(_) => {
-                    self.force_manager_reset("WebSocket handler channel unexpectedly closed")
-                        .await;
+                    self.force_manager_reset(
+                        "Cannot send message to WebSocket handler: channel unexpectedly closed",
+                    )
+                    .await;
 
                     Err(())
                 }
@@ -1371,6 +1624,21 @@ impl LgTvManager {
         if let ManagerStatus::Communicating(_) = self.manager_status {
             self.emit_last_seen_tv().await;
         }
+    }
+
+    /// Set the reconnect flow status and notify the caller.
+    ///
+    /// Note: The reconnect flow status exists separately from the manager status. While the
+    ///     reconnect flow is active, the manager's status will cycle through its normal connect
+    ///     phases (Connecting, Communicating, etc).
+    async fn set_reconnect_flow_status(&mut self, reconnect_status: ReconnectFlowStatus) {
+        self.reconnect_flow_status = reconnect_status;
+
+        let _ = self
+            .send_out(ManagerOutputMessage::IsReconnectFlowActive(
+                self.reconnect_flow_status == ReconnectFlowStatus::Active
+            ))
+            .await;
     }
 
     /// Send `LastSeenTv` details to the caller.

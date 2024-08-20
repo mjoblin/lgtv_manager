@@ -6,7 +6,7 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::messages::{LgTvRequest, LgTvRequestType};
-use crate::LgTvDevice;
+use crate::{Connection, LgTvDevice};
 
 // This LG TV register payload seems to be used by various projects which talk to LG TVs over the
 // SSAP WebSocket protocol. Since SSAP appears to be largely undocumented, this payload is being
@@ -68,10 +68,7 @@ pub(crate) fn generate_register_request(
 /// tv.local/some/path -> wss://tv.local:3001/some/path
 /// ws://10.0.0.101 -> ws://10.0.0.101:3000/
 /// 10.0.0.101:3333 -> wss://10.0.0.101:3333/
-pub(crate) fn generate_possible_websocket_url(
-    in_str: &str,
-    is_tls: bool,
-) -> Result<String, String> {
+fn generate_possible_websocket_url(in_str: &str, is_tls: bool) -> Result<String, String> {
     if in_str.is_empty() {
         return Err(String::from("No host specified"));
     }
@@ -119,6 +116,29 @@ pub(crate) fn generate_possible_websocket_url(
         },
         Err(e) => Err(format!("Could not parse host: {:?}", e)),
     };
+}
+
+/// Generate an LG WebSocket URL for the given Connection.
+pub(crate) fn websocket_url_for_connection(connection: &Connection) -> Result<String, String> {
+    // Determine the TV URL (most likely an IP or host name)
+    let tv_url = match connection {
+        Connection::Host(host, _) => host.clone(),
+        Connection::Device(device, _) => match device_host(device) {
+            Ok(host) => host.clone(),
+            Err(e) => {
+                return Err(e);
+            }
+        },
+    };
+
+    // Determine whether TLS is requested.
+    let is_tls = match &connection {
+        Connection::Host(_, settings) => settings.is_tls,
+        Connection::Device(_, settings) => settings.is_tls,
+    };
+
+    // Generate a WebSocket URL from the TV host and TLS requirement.
+    generate_possible_websocket_url(&tv_url, is_tls)
 }
 
 /// Extract the hostname from the given UPnP `device`.
