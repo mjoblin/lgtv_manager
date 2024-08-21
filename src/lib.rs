@@ -434,8 +434,8 @@ pub use messages::{CurrentSwInfoPayload as TvSoftwareInfo, ExternalInput as TvIn
 use messages::{LgTvResponse, LgTvResponsePayload};
 use state::{read_persisted_state, write_persisted_state, PersistedState};
 pub use state::{LastSeenTv, TvInfo, TvState};
-pub use state_machine::State as ManagerStatus;
 use state_machine::{start_state_machine, Input, Output, StateMachineUpdateMessage};
+pub use state_machine::{ReconnectDetails, State as ManagerStatus};
 use websocket::{LgTvWebSocket, WsCommand, WsMessage, WsStatus, WsUpdateMessage};
 
 use crate::state_machine::State;
@@ -642,6 +642,7 @@ pub struct LgTvManager {
     connection_details: Option<Connection>, // LgTvManager only handles up to 1 connection at a time
     is_connection_initialized: bool, // TV connection has been made and initial setup commands are sent
     reconnect_flow_status: ReconnectFlowStatus,
+    reconnect_attempts: u64,
     session_connection_count: u64,
 
     // Manager in/out channels
@@ -703,6 +704,7 @@ impl LgTvManager {
             connection_details: None,
             is_connection_initialized: false,
             reconnect_flow_status: ReconnectFlowStatus::Inactive,
+            reconnect_attempts: 0,
             session_connection_count: 0,
             command_rx,
             output_tx,
@@ -756,7 +758,8 @@ impl LgTvManager {
 
         self.initialize_manager_state().await;
         self.emit_manager_status().await;
-        self.set_reconnect_flow_status(ReconnectFlowStatus::Inactive).await;
+        self.set_reconnect_flow_status(ReconnectFlowStatus::Inactive)
+            .await;
 
         info!("Manager ready to receive commands (send a Connect command first if desired)");
 
@@ -1041,6 +1044,11 @@ impl LgTvManager {
             self.session_connection_count = 0;
         }
 
+        if self.reconnect_flow_status == ReconnectFlowStatus::Cancelled {
+            self.set_reconnect_flow_status(ReconnectFlowStatus::Inactive)
+                .await;
+        }
+
         self.read_persisted_state();
         self.emit_all_tv_details().await;
     }
@@ -1082,11 +1090,15 @@ impl LgTvManager {
     ///
     /// The reconnect flow won't begin until the state machine reaches the Disconnected state.
     async fn optionally_prepare_for_reconnect(&mut self) {
-        self.set_reconnect_flow_status(
-            match self.is_auto_reconnect_enabled() {
-                true => ReconnectFlowStatus::Active,
-                false => ReconnectFlowStatus::Inactive,
-            }).await;
+        if self.reconnect_flow_status == ReconnectFlowStatus::Cancelled {
+            return;
+        }
+
+        self.set_reconnect_flow_status(match self.is_auto_reconnect_enabled() {
+            true => ReconnectFlowStatus::Active,
+            false => ReconnectFlowStatus::Inactive,
+        })
+        .await;
     }
 
     /// Should a connect failure be retried.
@@ -1296,8 +1308,9 @@ impl LgTvManager {
                             match self.is_initial_connect_retries_enabled() {
                                 true => ReconnectFlowStatus::Active,
                                 false => ReconnectFlowStatus::Inactive,
-                            }
-                        ).await;
+                            },
+                        )
+                        .await;
 
                         let _ = self.send_to_fsm(Input::Connect(url.clone())).await;
                         self.ws_url = Some(url);
@@ -1448,7 +1461,8 @@ impl LgTvManager {
         let url = match &self.ws_url {
             Some(url) => url.clone(),
             None => {
-                self.set_reconnect_flow_status(ReconnectFlowStatus::Inactive).await;
+                self.set_reconnect_flow_status(ReconnectFlowStatus::Inactive)
+                    .await;
                 self.force_manager_reset(
                     "Unable to initiate reconnect: cannot determine URL to re-connect to",
                 )
@@ -1479,8 +1493,11 @@ impl LgTvManager {
 
                     let _ = self
                         .send_out(ManagerOutputMessage::Status(ManagerStatus::Reconnecting(
-                            url.clone(),
-                            time_to_retry,
+                            ReconnectDetails {
+                                url: url.clone(),
+                                attempts: self.reconnect_attempts,
+                                next_attempt_secs: time_to_retry,
+                            },
                         )))
                         .await;
 
@@ -1488,7 +1505,11 @@ impl LgTvManager {
                 }
             }
 
-            info!("Attempting reconnect to TV: {}", &url);
+            self.reconnect_attempts += 1;
+            info!(
+                "Attempting reconnect #{} to TV: {}",
+                self.reconnect_attempts, &url
+            );
 
             if let Err(e) = self
                 .initiate_connect_to_tv(connection_details.clone())
@@ -1632,11 +1653,19 @@ impl LgTvManager {
     ///     reconnect flow is active, the manager's status will cycle through its normal connect
     ///     phases (Connecting, Communicating, etc).
     async fn set_reconnect_flow_status(&mut self, reconnect_status: ReconnectFlowStatus) {
+        if self.reconnect_flow_status == ReconnectFlowStatus::Inactive {
+            self.reconnect_attempts = 0;
+        }
+
         self.reconnect_flow_status = reconnect_status;
 
+        // Both Active and Cancelled are considered to be part of an active reconnect flow.
+        // Cancelled will ultimately become Inactive at which point the flow will no longer be
+        // considered active.
         let _ = self
             .send_out(ManagerOutputMessage::IsReconnectFlowActive(
                 self.reconnect_flow_status == ReconnectFlowStatus::Active
+                    || self.reconnect_flow_status == ReconnectFlowStatus::Cancelled,
             ))
             .await;
     }
