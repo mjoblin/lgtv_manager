@@ -31,6 +31,8 @@ impl fmt::Display for Connection {
 pub struct ConnectionSettings {
     pub is_tls: bool,
     pub force_pairing: bool,
+    pub initial_connect_retries: bool,
+    pub auto_reconnect: bool,
 }
 
 impl Default for ConnectionSettings {
@@ -52,11 +54,15 @@ impl Default for ConnectionSettings {
 /// ConnectionSettingsBuilder::new()
 ///     .with_no_tls()
 ///     .with_forced_pairing()
+///     .with_initial_connect_retries()
+///     .with_auto_reconnect()
 ///     .build();
 /// ```
 pub struct ConnectionSettingsBuilder {
     is_tls: bool,
     force_pairing: bool,
+    initial_connect_retries: bool,
+    auto_reconnect: bool,
 }
 
 impl Default for ConnectionSettingsBuilder {
@@ -70,7 +76,8 @@ impl ConnectionSettingsBuilder {
         Self {
             is_tls: true,
             force_pairing: false,
-            // auto_reconnect: false,
+            initial_connect_retries: false,
+            auto_reconnect: false,
         }
     }
 
@@ -84,11 +91,22 @@ impl ConnectionSettingsBuilder {
         self
     }
 
+    pub fn with_initial_connect_retries(mut self) -> Self {
+        self.initial_connect_retries = true;
+        self
+    }
+
+    pub fn with_auto_reconnect(mut self) -> Self {
+        self.auto_reconnect = true;
+        self
+    }
+
     pub fn build(&mut self) -> ConnectionSettings {
         ConnectionSettings {
             is_tls: self.is_tls,
             force_pairing: self.force_pairing,
-            // auto_reconnect: self.auto_reconnect,
+            initial_connect_retries: self.initial_connect_retries,
+            auto_reconnect: self.auto_reconnect,
         }
     }
 }
@@ -98,8 +116,9 @@ impl ConnectionSettingsBuilder {
 
 #[cfg(test)]
 mod tests {
-    use super::{Connection, ConnectionSettings, ConnectionSettingsBuilder};
     use crate::LgTvDevice;
+
+    use super::{Connection, ConnectionSettings, ConnectionSettingsBuilder};
 
     #[test]
     fn connection_settings_default() {
@@ -108,6 +127,8 @@ mod tests {
             ConnectionSettings {
                 is_tls: true,
                 force_pairing: false,
+                initial_connect_retries: false,
+                auto_reconnect: false,
             }
         );
     }
@@ -118,10 +139,14 @@ mod tests {
             ConnectionSettingsBuilder::new()
                 .with_no_tls()
                 .with_forced_pairing()
+                .with_initial_connect_retries()
+                .with_auto_reconnect()
                 .build(),
             ConnectionSettings {
                 is_tls: false,
                 force_pairing: true,
+                initial_connect_retries: true,
+                auto_reconnect: true,
             }
         );
     }
@@ -130,7 +155,7 @@ mod tests {
     fn connection_display_host() {
         assert_eq!(
             Connection::Host("127.0.0.1".to_string(), ConnectionSettings::default()).to_string(),
-            "Connection to host '127.0.0.1', ConnectionSettings { is_tls: true, force_pairing: false }"
+            "Connection to host '127.0.0.1', ConnectionSettings { is_tls: true, force_pairing: false, initial_connect_retries: false, auto_reconnect: false }"
         );
     }
 
@@ -145,7 +170,7 @@ mod tests {
                 url: "http://38.0.101.76:3000".to_string(),
                 udn: "uuid:00000000-0000-0000-0000-000000000000".to_string(),
             }, ConnectionSettings::default()).to_string(),
-            "Connection to UPnP device 'LG WebOS TV', ConnectionSettings { is_tls: true, force_pairing: false }"
+            "Connection to UPnP device 'LG WebOS TV', ConnectionSettings { is_tls: true, force_pairing: false, initial_connect_retries: false, auto_reconnect: false }"
         );
     }
 }

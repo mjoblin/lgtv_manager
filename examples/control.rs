@@ -2,7 +2,7 @@ use env_logger;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
 
-use lgtv_manager::ManagerMessage::{Connect, Disconnect, SendTvCommand, ShutDown};
+use lgtv_manager::ManagerMessage::{Connect, Disconnect, SendTvCommand, ShutDown, TestConnection};
 use lgtv_manager::ManagerStatus::Disconnected;
 use lgtv_manager::{
     Connection, ConnectionSettings, LgTvManager, ManagerOutputMessage,
@@ -34,8 +34,9 @@ async fn main() -> Result<(), ()> {
                     println!("\n>>> Manager is disconnected and ready to receive messages");
                     println!(">>> SEND CONNECT ('c') COMMAND FIRST; TV IP MUST BE VALID");
                     println!(concat!(
-                        ">>> Enter command: c (connect), u (volume up), d (volume down), ",
-                        "i (disconnect), s (shut down)\n"
+                        ">>> Enter command:\n",
+                        ">>>    c (connect), u (volume up), d (volume down)\n",
+                        ">>>    t (test connection), i (disconnect), s (shut down)\n"
                     ));
                 }
             }
@@ -81,6 +82,12 @@ async fn main() -> Result<(), ()> {
                 "d" => {
                     to_manager_clone
                         .send(SendTvCommand(VolumeDown))
+                        .await
+                        .map_err(|_| ())?;
+                }
+                "t" => {
+                    to_manager_clone
+                        .send(TestConnection)
                         .await
                         .map_err(|_| ())?;
                 }
