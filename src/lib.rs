@@ -1262,7 +1262,9 @@ impl LgTvManager {
                 error!("Received error from TV: {:?}", &error_response);
 
                 let is_pairing_error = match &error_response.error {
-                    Some(error_string) => error_string.contains("pairing"),
+                    Some(error_string) => {
+                        error_string.contains("pairing") || error_string.contains("403 cancelled")
+                    }
                     None => false,
                 };
 
