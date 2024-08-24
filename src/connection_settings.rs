@@ -27,9 +27,10 @@ impl fmt::Display for Connection {
 }
 
 /// Settings to use when connecting to a TV. Can be created with [`ConnectionSettingsBuilder`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ConnectionSettings {
     pub is_tls: bool,
+    pub client_key: Option<String>,
     pub force_pairing: bool,
     pub initial_connect_retries: bool,
     pub auto_reconnect: bool,
@@ -53,6 +54,7 @@ impl Default for ConnectionSettings {
 /// // Connection settings with overrides
 /// ConnectionSettingsBuilder::new()
 ///     .with_no_tls()
+///     .with_client_key("client-key".into())
 ///     .with_forced_pairing()
 ///     .with_initial_connect_retries()
 ///     .with_auto_reconnect()
@@ -60,6 +62,7 @@ impl Default for ConnectionSettings {
 /// ```
 pub struct ConnectionSettingsBuilder {
     is_tls: bool,
+    client_key: Option<String>,
     force_pairing: bool,
     initial_connect_retries: bool,
     auto_reconnect: bool,
@@ -75,6 +78,7 @@ impl ConnectionSettingsBuilder {
     pub fn new() -> Self {
         Self {
             is_tls: true,
+            client_key: None,
             force_pairing: false,
             initial_connect_retries: false,
             auto_reconnect: false,
@@ -83,6 +87,11 @@ impl ConnectionSettingsBuilder {
 
     pub fn with_no_tls(mut self) -> Self {
         self.is_tls = false;
+        self
+    }
+
+    pub fn with_client_key(mut self, client_key: String) -> Self {
+        self.client_key = Some(client_key);
         self
     }
 
@@ -104,6 +113,7 @@ impl ConnectionSettingsBuilder {
     pub fn build(&mut self) -> ConnectionSettings {
         ConnectionSettings {
             is_tls: self.is_tls,
+            client_key: self.client_key.clone(),
             force_pairing: self.force_pairing,
             initial_connect_retries: self.initial_connect_retries,
             auto_reconnect: self.auto_reconnect,
@@ -126,6 +136,7 @@ mod tests {
             ConnectionSettings::default(),
             ConnectionSettings {
                 is_tls: true,
+                client_key: None,
                 force_pairing: false,
                 initial_connect_retries: false,
                 auto_reconnect: false,
@@ -138,12 +149,14 @@ mod tests {
         assert_eq!(
             ConnectionSettingsBuilder::new()
                 .with_no_tls()
+                .with_client_key("test-key".into())
                 .with_forced_pairing()
                 .with_initial_connect_retries()
                 .with_auto_reconnect()
                 .build(),
             ConnectionSettings {
                 is_tls: false,
+                client_key: Some("test-key".into()),
                 force_pairing: true,
                 initial_connect_retries: true,
                 auto_reconnect: true,
@@ -155,7 +168,7 @@ mod tests {
     fn connection_display_host() {
         assert_eq!(
             Connection::Host("127.0.0.1".to_string(), ConnectionSettings::default()).to_string(),
-            "Connection to host '127.0.0.1', ConnectionSettings { is_tls: true, force_pairing: false, initial_connect_retries: false, auto_reconnect: false }"
+            "Connection to host '127.0.0.1', ConnectionSettings { is_tls: true, client_key: None, force_pairing: false, initial_connect_retries: false, auto_reconnect: false }"
         );
     }
 
@@ -170,7 +183,7 @@ mod tests {
                 url: "http://38.0.101.76:3000".to_string(),
                 udn: "uuid:00000000-0000-0000-0000-000000000000".to_string(),
             }, ConnectionSettings::default()).to_string(),
-            "Connection to UPnP device 'LG WebOS TV', ConnectionSettings { is_tls: true, force_pairing: false, initial_connect_retries: false, auto_reconnect: false }"
+            "Connection to UPnP device 'LG WebOS TV', ConnectionSettings { is_tls: true, client_key: None, force_pairing: false, initial_connect_retries: false, auto_reconnect: false }"
         );
     }
 }
