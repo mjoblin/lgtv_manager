@@ -18,7 +18,7 @@ pub(crate) fn generate_lgtv_message_id() -> String {
     #[cfg(test)]
     let id = "test-id".to_string();
     #[cfg(not(test))]
-    let id = Uuid::new_v4().to_hyphenated().to_string();
+    let id = Uuid::new_v4().hyphenated().to_string();
 
     id
 }
