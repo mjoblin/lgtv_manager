@@ -461,6 +461,10 @@ pub enum ManagerMessage {
     CancelReconnect,
     /// Connect to an LG TV using either a host/IP or a UPnP device.
     Connect(Connection),
+    /// Connect to an LG TV using the `Connection` details from the last good connection. Requires
+    /// at least one successful prior `Connect` to a TV host/IP or UPnP device during the current
+    /// manager session.
+    ConnectLastGoodConnection,
     /// Disconnect from the TV.
     Disconnect,
     /// Perform UPnP discovery for LG TVs on the network.
@@ -641,6 +645,7 @@ pub struct LgTvManager {
     tv_state: TvState,
     client_key: Option<String>, // Unique LG client key, provided by the TV after pairing
     connection_details: Option<Connection>, // LgTvManager only handles up to 1 connection at a time
+    last_good_connection: Option<Connection>,
     is_connection_initialized: bool, // TV connection has been made and initial setup commands are sent
     reconnect_flow_status: ReconnectFlowStatus,
     reconnect_attempts: u64,
@@ -703,6 +708,7 @@ impl LgTvManager {
             tv_state: TvState::default(),
             client_key: None,
             connection_details: None,
+            last_good_connection: None,
             is_connection_initialized: false,
             reconnect_flow_status: ReconnectFlowStatus::Inactive,
             reconnect_attempts: 0,
@@ -792,24 +798,27 @@ impl LgTvManager {
                             }
                         }
                         ManagerMessage::Connect(connection) => {
-                            if let Some(manual_client_key) = match &connection {
-                                Connection::Device(_, settings) => settings.client_key.clone(),
-                                Connection::Host(_, settings) => settings.client_key.clone(),
-                            } {
-                                info!("Using client key from connection settings");
-                                self.client_key = Some(manual_client_key);
-                            }
-
                             if let Err(e) = self.initiate_connect_to_tv(connection).await {
                                 let _ = self.send_out(ManagerOutputMessage::Error(ManagerError::Connection(e))).await;
                             }
                         }
+                        ManagerMessage::ConnectLastGoodConnection => {
+                            if let Some(last_good_connection) = &self.last_good_connection {
+                                info!("Connecting with last-good connection details: {:?}", &last_good_connection);
+
+                                if let Err(e) = self.initiate_connect_to_tv(last_good_connection.clone()).await {
+                                    let _ = self.send_out(ManagerOutputMessage::Error(ManagerError::Connection(e))).await;
+                                }
+                            } else {
+                                warn!("No last-good connection details found; connect request ignored");
+                            }
+                        }
                         ManagerMessage::Disconnect => {
                             let _ = self.send_to_fsm(Input::Disconnect).await;
-                        },
+                        }
                         ManagerMessage::Discover => {
                             self.discover();
-                        },
+                        }
                         ManagerMessage::EmitAllState => {
                             self.emit_manager_status().await;
                             self.emit_all_tv_details().await;
@@ -823,10 +832,10 @@ impl LgTvManager {
                             } else {
                                 warn!("Cannot test connection while not connected");
                             }
-                        },
+                        }
                         ManagerMessage::SendTvCommand(lgtv_command) => {
                             let _ = self.send_to_fsm(Input::SendCommand(lgtv_command)).await;
-                        },
+                        }
                         ManagerMessage::ShutDown => {
                             info!("Manager shutting down");
                             cancel_token.cancel();
@@ -839,7 +848,7 @@ impl LgTvManager {
                             info!("Tasks shut down successfully");
 
                             break;
-                        },
+                        }
                     }
                 }
 
@@ -1301,6 +1310,15 @@ impl LgTvManager {
     ///
     /// The connection flow is initiated by passing `Input::Connect` to the state machine.
     async fn initiate_connect_to_tv(&mut self, connection: Connection) -> Result<(), String> {
+        // Check whether the Connection contains a client key override.
+        if let Some(manual_client_key) = match &connection {
+            Connection::Device(_, settings) => settings.client_key.clone(),
+            Connection::Host(_, settings) => settings.client_key.clone(),
+        } {
+            info!("Using client key from connection settings");
+            self.client_key = Some(manual_client_key);
+        }
+
         if self.manager_status != ManagerStatus::Disconnected {
             // Note: There's a lag between a connection request and the state machine entering a
             // non-Disconnected state, so this check isn't perfect -- but it should be good enough
@@ -1426,6 +1444,11 @@ impl LgTvManager {
         let _ = self
             .send_to_ws(WsMessage::Payload(TvCommand::SubscribeGetVolume.into()))
             .await;
+
+        // Track this connection as our last-known-good-connection, if it's a Host or Device.
+        if let Some(current_connection) = &self.connection_details {
+            self.last_good_connection = Some(current_connection.clone());
+        }
     }
 
     /// Initiate a disconnect from the TV.

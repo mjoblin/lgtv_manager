@@ -22,7 +22,7 @@ use tokio::time::{timeout, Duration};
 use tokio_tungstenite::{
     connect_async_tls_with_config, Connector, MaybeTlsStream, WebSocketStream,
 };
-use tungstenite::Message;
+use tungstenite::{Error, Message};
 
 // CHANNEL MESSAGES -------------------------------------------------------------------------------
 
@@ -327,7 +327,20 @@ impl LgTvWebSocket {
 
         let (ws_stream, _) = match timeout(CONNECTION_TIMEOUT, connect_future).await {
             Ok(Ok(conn_result)) => conn_result,
-            Ok(Err(e)) => return Err(format!("Failed to connect to TV: {:?}", e)),
+            Ok(Err(e)) => {
+                return match e {
+                    Error::Io(e) => {
+                        let error_string = e.to_string();
+
+                        return if error_string.contains("Host is down") {
+                            Err("Failed to connect to TV: Host is down".into())
+                        } else {
+                            Err(format!("Failed to connect to TV: {error_string}"))
+                        };
+                    }
+                    _ => Err(format!("Failed to connect to TV: {:?}", e)),
+                }
+            }
             Err(_) => return Err("Failed to connect to TV: Connection timeout".into()),
         };
 
