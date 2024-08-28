@@ -24,11 +24,7 @@ pub struct LgTvDevice {
 
 impl fmt::Display for LgTvDevice {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{} ({}) [{}]",
-            self.friendly_name, self.model, self.udn
-        )
+        write!(f, "{} ({}) [{}]", self.friendly_name, self.model, self.udn)
     }
 }
 

@@ -89,9 +89,7 @@ impl From<TvCommand> for String {
                 let data = LgTvRequest {
                     r#type: LgTvRequestType::Request,
                     id: generate_lgtv_message_id(),
-                    uri: Some(
-                        "ssap://tv/getExternalInputList".to_string(),
-                    ),
+                    uri: Some("ssap://tv/getExternalInputList".to_string()),
                     payload: None,
                 };
 
@@ -486,7 +484,10 @@ mod tests {
     #[test]
     fn tvcommand_display() {
         assert_eq!(TvCommand::GetCurrentSWInfo.to_string(), "GetCurrentSWInfo");
-        assert_eq!(TvCommand::GetExternalInputList.to_string(), "GetExternalInputList");
+        assert_eq!(
+            TvCommand::GetExternalInputList.to_string(),
+            "GetExternalInputList"
+        );
         assert_eq!(TvCommand::GetPowerState.to_string(), "GetPowerState");
         assert_eq!(TvCommand::GetSystemInfo.to_string(), "GetSystemInfo");
         assert_eq!(TvCommand::GetVolume.to_string(), "GetVolume");
@@ -497,11 +498,23 @@ mod tests {
         assert_eq!(TvCommand::MediaStop.to_string(), "MediaStop");
         assert_eq!(TvCommand::SetMute(true).to_string(), "SetMute(true)");
         assert_eq!(TvCommand::SetMute(false).to_string(), "SetMute(false)");
-        assert_eq!(TvCommand::SetScreenOn(true).to_string(), "SetScreenOn(true)");
-        assert_eq!(TvCommand::SetScreenOn(false).to_string(), "SetScreenOn(false)");
+        assert_eq!(
+            TvCommand::SetScreenOn(true).to_string(),
+            "SetScreenOn(true)"
+        );
+        assert_eq!(
+            TvCommand::SetScreenOn(false).to_string(),
+            "SetScreenOn(false)"
+        );
         assert_eq!(TvCommand::SetVolume(10).to_string(), "SetVolume(10)");
-        assert_eq!(TvCommand::SubscribeGetVolume.to_string(), "SubscribeGetVolume");
-        assert_eq!(TvCommand::SwitchInput("test_input".into()).to_string(), "SwitchInput(test_input)");
+        assert_eq!(
+            TvCommand::SubscribeGetVolume.to_string(),
+            "SubscribeGetVolume"
+        );
+        assert_eq!(
+            TvCommand::SwitchInput("test_input".into()).to_string(),
+            "SwitchInput(test_input)"
+        );
         assert_eq!(TvCommand::TurnOff.to_string(), "TurnOff");
         assert_eq!(TvCommand::VolumeDown.to_string(), "VolumeDown");
         assert_eq!(TvCommand::VolumeUp.to_string(), "VolumeUp");
