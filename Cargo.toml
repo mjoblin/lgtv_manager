@@ -16,6 +16,7 @@ futures = "0.3.30"
 futures-util = "0.3.30"
 futures-channel = "0.3.30"
 log = "0.4.22"
+macaddr = "1.0.1"
 native-tls = "0.2.12"
 pin-utils = "0.1.0"
 rupnp = { version = "2.0.0", features = ["full_device_spec"] }
@@ -29,6 +30,7 @@ tokio-util = { version = "0.7.11", features = ["rt"] }
 tungstenite = "0.21.0"
 url = "2.5.2"
 uuid = { version = "1.10.0", features = ["v4"] }
+wol-rs = "1.0.1"
 
 [dev-dependencies]
 env_logger = "0.11.5"

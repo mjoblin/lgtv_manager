@@ -412,34 +412,7 @@ async fn main() -> Result<(), ()> {
     Ok(())
 }
 ```
- */
-
-use std::cmp::PartialEq;
-use std::path::PathBuf;
-use std::time::SystemTime;
-
-use log::{debug, error, info, warn};
-use tokio::select;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::task::JoinHandle;
-use tokio::time;
-use tokio_util::sync::CancellationToken;
-use tokio_util::task::TaskTracker;
-
-pub use commands::TvCommand;
-pub use connection_settings::{Connection, ConnectionSettings, ConnectionSettingsBuilder};
-use discovery::discover_lgtv_devices;
-pub use discovery::LgTvDevice;
-use helpers::{generate_lgtv_message_id, generate_register_request, websocket_url_for_connection};
-pub use messages::{CurrentSwInfoPayload as TvSoftwareInfo, ExternalInput as TvInput};
-use messages::{LgTvResponse, LgTvResponsePayload};
-use state::{read_persisted_state, write_persisted_state, PersistedState};
-pub use state::{LastSeenTv, TvInfo, TvState};
-use state_machine::{start_state_machine, Input, Output, StateMachineUpdateMessage};
-pub use state_machine::{ReconnectDetails, State as ManagerStatus};
-use websocket::{LgTvWebSocket, WsCommand, WsMessage, WsStatus, WsUpdateMessage};
-
-use crate::state_machine::State;
+*/
 
 mod commands;
 mod connection_settings;
@@ -449,6 +422,34 @@ mod messages;
 mod state;
 mod state_machine;
 mod websocket;
+
+use std::cmp::PartialEq;
+use std::path::PathBuf;
+use std::time::SystemTime;
+
+use discovery::discover_lgtv_devices;
+use helpers::{
+    generate_lgtv_message_id, generate_register_request, url_ip_addr, websocket_url_for_connection,
+};
+use log::{debug, error, info, warn};
+use messages::{LgTvResponse, LgTvResponsePayload};
+use state::{read_persisted_state, write_persisted_state, PersistedState};
+use state_machine::{start_state_machine, Input, Output, State, StateMachineUpdateMessage};
+use tokio::select;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::task::JoinHandle;
+use tokio::time;
+use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
+use websocket::{LgTvWebSocket, WsCommand, WsMessage, WsStatus, WsUpdateMessage};
+use wol::{send_wol, MacAddr};
+
+pub use commands::TvCommand;
+pub use connection_settings::{Connection, ConnectionSettings, ConnectionSettingsBuilder};
+pub use discovery::LgTvDevice;
+pub use messages::{CurrentSwInfoPayload as TvSoftwareInfo, ExternalInput as TvInput};
+pub use state::{LastSeenTv, TvInfo, TvState};
+pub use state_machine::{ReconnectDetails, State as ManagerStatus};
 
 // CHANNEL MESSAGES -------------------------------------------------------------------------------
 
@@ -479,6 +480,8 @@ pub enum ManagerMessage {
     /// Test the connection to the TV. The manager will respond with
     /// [`ManagerOutputMessage::IsConnectionOk`].
     TestConnection,
+    /// Send a Wake-on-LAN network request to the last-seen TV to wake from standby.
+    WakeLastSeenTv,
 }
 
 /// Messages sent from the [`LgTvManager`] back to the caller.
@@ -496,6 +499,8 @@ pub enum ManagerOutputMessage {
     IsReconnectFlowActive(bool),
     /// Is UPnP discovery being performed.
     IsDiscovering(bool),
+    /// Is it possible to wake the last-seen TV from standby.
+    IsWakeLastSeenTvAvailable(bool),
     /// Information on the TV last connected to by the Manager. Connection may have been
     /// established during a previous session.
     LastSeenTv(LastSeenTv),
@@ -576,7 +581,7 @@ impl LgTvManagerBuilder {
 
         self.manager.data_dir = Some(data_dir);
         self.manager.clear_persisted_state_on_manager();
-        self.manager.read_persisted_state();
+        self.manager.import_persisted_state();
 
         self
     }
@@ -644,6 +649,7 @@ pub struct LgTvManager {
     tv_software_info: Option<TvSoftwareInfo>,
     tv_state: TvState,
     client_key: Option<String>, // Unique LG client key, provided by the TV after pairing
+    mac_addr: Option<String>,   // MAC address of the TV, provided by UPnP discovery
     connection_details: Option<Connection>, // LgTvManager only handles up to 1 connection at a time
     last_good_connection: Option<Connection>,
     is_connection_initialized: bool, // TV connection has been made and initial setup commands are sent
@@ -707,6 +713,7 @@ impl LgTvManager {
             tv_software_info: None,
             tv_state: TvState::default(),
             client_key: None,
+            mac_addr: None,
             connection_details: None,
             last_good_connection: None,
             is_connection_initialized: false,
@@ -723,7 +730,7 @@ impl LgTvManager {
             data_dir: None,
         };
 
-        manager.read_persisted_state();
+        manager.import_persisted_state();
 
         (manager, manager_channel_rx)
     }
@@ -848,6 +855,9 @@ impl LgTvManager {
                             info!("Tasks shut down successfully");
 
                             break;
+                        }
+                        ManagerMessage::WakeLastSeenTv => {
+                            self.wake_last_seen_tv().await;
                         }
                     }
                 }
@@ -1059,6 +1069,7 @@ impl LgTvManager {
         if self.reconnect_flow_status != ReconnectFlowStatus::Active {
             self.connection_details = None;
             self.ws_url = None;
+            self.mac_addr = None;
             self.session_connection_count = 0;
         }
 
@@ -1067,7 +1078,7 @@ impl LgTvManager {
                 .await;
         }
 
-        self.read_persisted_state();
+        self.import_persisted_state();
         self.emit_all_tv_details().await;
     }
 
@@ -1078,6 +1089,7 @@ impl LgTvManager {
         self.emit_tv_inputs().await;
         self.emit_tv_software_info().await;
         self.emit_tv_state().await;
+        self.emit_is_wake_tv_available().await;
     }
 
     /// Are initial connect retries enabled for the current `Connection`.
@@ -1260,7 +1272,7 @@ impl LgTvManager {
                 info!("TV client registration complete");
 
                 self.client_key = Some(registered_response.payload.client_key);
-                self.write_persisted_state();
+                self.write_persisted_state().await;
 
                 let _ = self.send_to_fsm(Input::Initialize).await;
             }
@@ -1331,7 +1343,7 @@ impl LgTvManager {
             if self.to_fsm_tx.is_some() {
                 match websocket_url_for_connection(&connection) {
                     Ok(url) => {
-                        self.connection_details = Some(connection);
+                        self.connection_details = Some(connection.clone());
 
                         self.set_reconnect_flow_status(
                             match self.is_initial_connect_retries_enabled() {
@@ -1342,7 +1354,34 @@ impl LgTvManager {
                         .await;
 
                         let _ = self.send_to_fsm(Input::Connect(url.clone())).await;
-                        self.ws_url = Some(url);
+
+                        // Store the WebSocket URL and MAC address for this connection.
+                        self.ws_url = Some(url.clone());
+
+                        // A UPnP Device connection should include the MAC address, but a Host
+                        // connection won't. For a Host, we check if we can use the mac address
+                        // last persisted to disk. This really just supports the case where a
+                        // previous Device connection is being re-established as a Host connection.
+                        self.mac_addr = match connection {
+                            Connection::Host(_, _) => {
+                                match read_persisted_state(self.data_dir.clone()) {
+                                    Ok(persisted) => {
+                                        if persisted.ws_url == Some(url) {
+                                            debug!(
+                                                "Using persisted MAC address for Host connection: {:?}",
+                                                &persisted.mac_addr,
+                                            );
+
+                                            persisted.mac_addr
+                                        } else {
+                                            None
+                                        }
+                                    }
+                                    Err(_) => None,
+                                }
+                            }
+                            Connection::Device(device, _) => device.mac_addr.clone(),
+                        };
 
                         Ok(())
                     }
@@ -1443,6 +1482,9 @@ impl LgTvManager {
             .await;
         let _ = self
             .send_to_ws(WsMessage::Payload(TvCommand::SubscribeGetVolume.into()))
+            .await;
+        let _ = self
+            .send_to_ws(WsMessage::Payload(TvCommand::SubscribeGetPowerState.into()))
             .await;
 
         // Track this connection as our last-known-good-connection, if it's a Host or Device.
@@ -1588,6 +1630,48 @@ impl LgTvManager {
         self.set_manager_status(State::Zombie).await;
     }
 
+    /// Send a Wake-on-LAN request to the TV persisted to disk.
+    async fn wake_last_seen_tv(&self) {
+        let mut result_msg: Option<String> = None;
+
+        match read_persisted_state(self.data_dir.clone()) {
+            Ok(persisted_state) => {
+                if let (Some(ws_url), Some(mac_addr)) =
+                    (persisted_state.ws_url, persisted_state.mac_addr)
+                {
+                    if let (Some(ip), Ok(mac)) = (url_ip_addr(&ws_url), mac_addr.parse()) {
+                        info!("Sending Wake-on-LAN to {}, {}", &ip, &mac);
+
+                        if let Err(e) = send_wol(MacAddr::from(mac), Some(ip), None) {
+                            result_msg = Some(format!("Send error: {}", e))
+                        }
+                    } else {
+                        result_msg = Some(format!(
+                            "Cannot determine host IP and MAC from URL: {} MAC: {}",
+                            &ws_url, &mac_addr
+                        ));
+                    }
+                } else {
+                    result_msg = Some("Missing WebSocket URL or MAC address".into());
+                }
+            }
+            Err(e) => {
+                result_msg = Some(format!("Cannot read persisted data: {}", e));
+            }
+        }
+
+        if let Some(msg) = result_msg {
+            let msg_out = format!("Cannot send Wake-on-LAN: {}", msg);
+            error!("{}", &msg_out);
+
+            let _ = self
+                .send_out(ManagerOutputMessage::Error(ManagerError::Action(
+                    msg_out.into(),
+                )))
+                .await;
+        }
+    }
+
     // --------------------------------------------------------------------------------------------
     // Message senders
 
@@ -1710,6 +1794,7 @@ impl LgTvManager {
             .send_out(ManagerOutputMessage::LastSeenTv(LastSeenTv {
                 websocket_url: self.ws_url.clone(),
                 client_key: self.client_key.clone(),
+                mac_addr: self.mac_addr.clone(),
             }))
             .await;
     }
@@ -1744,34 +1829,47 @@ impl LgTvManager {
             .await;
     }
 
+    /// Send the current `IsWakeTVAvailable` state to the caller.
+    async fn emit_is_wake_tv_available(&mut self) {
+        let _ = self
+            .send_out(ManagerOutputMessage::IsWakeLastSeenTvAvailable(
+                self.mac_addr.is_some(),
+            ))
+            .await;
+    }
+
     /// Import any previously-persisted `PersistedState` details from disk and store on the manager.
-    fn read_persisted_state(&mut self) {
+    fn import_persisted_state(&mut self) {
         match read_persisted_state(self.data_dir.clone()) {
             Ok(persisted_state) => {
                 self.ws_url = persisted_state.ws_url;
                 self.client_key = persisted_state.client_key;
+                self.mac_addr = persisted_state.mac_addr;
             }
             Err(e) => {
-                warn!("{}", e);
+                warn!("Could not import persisted state: {}", e);
             }
         }
     }
 
     /// Persist any `PersistedState` details associated with the manager to disk.
-    fn write_persisted_state(&mut self) {
-        if let Err(e) = write_persisted_state(
+    async fn write_persisted_state(&mut self) {
+        match write_persisted_state(
             PersistedState {
                 ws_url: self.ws_url.clone(),
                 client_key: self.client_key.clone(),
+                mac_addr: self.mac_addr.clone(),
             },
             self.data_dir.clone(),
         ) {
-            warn!("{}", e);
+            Ok(_) => self.emit_is_wake_tv_available().await,
+            Err(e) => warn!("{}", e),
         }
     }
 
     fn clear_persisted_state_on_manager(&mut self) {
-        self.client_key = None;
         self.ws_url = None;
+        self.client_key = None;
+        self.mac_addr = None;
     }
 }

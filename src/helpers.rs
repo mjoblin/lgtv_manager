@@ -1,7 +1,9 @@
 //! Helper functions.
 
+use core::net::IpAddr;
+
 use serde_json::Value;
-use url::Url;
+use url::{Host, Url};
 #[cfg(not(test))]
 use uuid::Uuid;
 
@@ -21,6 +23,22 @@ pub(crate) fn generate_lgtv_message_id() -> String {
     let id = Uuid::new_v4().hyphenated().to_string();
 
     id
+}
+
+/// Extract the IP address from the given `url`.
+pub(crate) fn url_ip_addr(url: &str) -> Option<IpAddr> {
+    match Url::parse(url) {
+        Ok(parsed_url) => match parsed_url.host() {
+            Some(host) => match host {
+                Host::Ipv4(ipv4) => Some(IpAddr::V4(ipv4)),
+                Host::Ipv6(ipv6) => Some(IpAddr::V6(ipv6)),
+                // TODO: Consider converting a hostname into an IP address
+                _ => None,
+            },
+            None => None,
+        },
+        Err(_) => None,
+    }
 }
 
 /// Generate an LG registration payload.

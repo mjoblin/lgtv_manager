@@ -15,6 +15,7 @@ const PERSISTED_STATE_FILE: &str = "lgtv_manager_data.json";
 pub struct LastSeenTv {
     pub websocket_url: Option<String>,
     pub client_key: Option<String>,
+    pub mac_addr: Option<String>,
 }
 
 /// Current TV state for the managed LG TV.
@@ -52,6 +53,7 @@ impl From<GetSystemInfoPayload> for TvInfo {
 pub(crate) struct PersistedState {
     pub ws_url: Option<String>,
     pub client_key: Option<String>,
+    pub mac_addr: Option<String>,
 }
 
 // ------------------------------------------------------------------------------------------------0
@@ -86,6 +88,7 @@ pub(crate) fn write_persisted_state(
             let persisted_state = PersistedState {
                 ws_url: state.ws_url.clone(),
                 client_key: state.client_key.clone(),
+                mac_addr: state.mac_addr.clone(),
             };
 
             match serde_json::to_string(&persisted_state) {

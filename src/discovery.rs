@@ -2,10 +2,13 @@
 
 use std::collections::HashSet;
 use std::fmt;
+use std::net::{IpAddr, Ipv4Addr};
+use std::process::Command;
 use std::time::Duration;
 
 use futures::prelude::*;
-use log::{error, info};
+use log::{error, info, warn};
+use macaddr::MacAddr;
 use rupnp::ssdp::{SearchTarget, URN};
 
 const DISCOVERY_DURATION_SECS: u64 = 3;
@@ -20,11 +23,48 @@ pub struct LgTvDevice {
     pub serial_number: Option<String>,
     pub url: String,
     pub udn: String,
+    pub mac_addr: Option<String>,
 }
 
 impl fmt::Display for LgTvDevice {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} ({}) [{}]", self.friendly_name, self.model, self.udn)
+    }
+}
+
+/// Get the MAC address for the given IP.
+///
+/// This uses the "arp" CLI tool assumed to be available from the OS. If that tool is not
+/// available, or if the MAC address was otherwise not determined, then None is returned.
+pub(crate) fn mac_address_for_ip(ip: IpAddr) -> Option<String> {
+    match Command::new("arp").arg("-n").arg(ip.to_string()).output() {
+        Ok(output) => {
+            let output_str = String::from_utf8_lossy(&output.stdout);
+
+            for line in output_str.lines() {
+                if line.contains(&ip.to_string()) {
+                    let parts: Vec<&str> = line.trim().split_whitespace().collect();
+
+                    for part in parts {
+                        if part.parse::<MacAddr>().is_ok() {
+                            return Some(part.into());
+                        }
+                    }
+
+                    warn!("Could not determine MAC address; MAC not found in 'arp' output");
+                    return None;
+                }
+            }
+
+            None
+        }
+        Err(e) => {
+            warn!(
+                "Could not invoke the 'arp' tool to determine MAC address: {:?}",
+                e
+            );
+            None
+        }
     }
 }
 
@@ -70,6 +110,7 @@ pub(crate) async fn discover_lgtv_devices() -> Result<Vec<LgTvDevice>, String> {
                         serial_number: device.serial_number().map(|s| s.to_owned()),
                         url: device.url().to_string(),
                         udn: device.udn().to_string(),
+                        mac_addr: mac_address_for_ip(IpAddr::V4(Ipv4Addr::new(192, 168, 3, 101))),
                     };
 
                     info!(
@@ -119,6 +160,7 @@ mod tests {
                 serial_number: None,
                 url: "http://38.0.101.76:3000".to_string(),
                 udn: "uuid:00000000-0000-0000-0000-000000000000".to_string(),
+                mac_addr: None,
             }
             .to_string(),
             "LG WebOS TV (model) [uuid:00000000-0000-0000-0000-000000000000]"

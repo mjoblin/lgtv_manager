@@ -182,6 +182,7 @@ mod tests {
                 serial_number: None,
                 url: "http://38.0.101.76:3000".to_string(),
                 udn: "uuid:00000000-0000-0000-0000-000000000000".to_string(),
+                mac_addr: None,
             }, ConnectionSettings::default()).to_string(),
             "Connection to UPnP device 'LG WebOS TV', ConnectionSettings { is_tls: true, client_key: None, force_pairing: false, initial_connect_retries: false, auto_reconnect: false }"
         );
