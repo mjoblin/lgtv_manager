@@ -647,7 +647,7 @@ impl LgTvManagerBuilder {
 //    longer do anything useful.
 
 #[derive(Clone, Debug, PartialEq)]
-enum ReconnectFlowStatus {
+pub enum ReconnectFlowStatus {
     Active,
     WaitingForTvOnNetwork,
     Cancelled,
@@ -1043,20 +1043,21 @@ impl LgTvManager {
                                         let msg = format!("WebSocket connect error: {:?}", &error);
                                         warn!("{}", &msg);
 
-                                        self.handle_websocket_problem().await;
+                                        self.optionally_prepare_for_reconnect().await;
                                         self.attempt_fsm_error(ManagerError::Connection(msg)).await;
                                     },
                                     WsStatus::MessageReadError(error) => {
                                         let msg = format!("WebSocket message read error: {:?}", &error);
                                         warn!("{}", &msg);
 
-                                        self.handle_websocket_problem().await;
+                                        self.optionally_prepare_for_reconnect().await;
                                         self.attempt_fsm_error(ManagerError::Connection(msg)).await;
                                     },
                                     WsStatus::ServerClosedConnection => {
                                         let msg = "Server closed connection";
                                         warn!("{}", &msg);
 
+                                        self.optionally_prepare_for_reconnect().await;
                                         self.attempt_fsm_error(ManagerError::Connection(msg.into())).await;
                                     },
                                 }
@@ -1289,7 +1290,7 @@ impl LgTvManager {
     }
 
     /// TODO: Docs
-    async fn handle_websocket_problem(&mut self) {
+    async fn optionally_prepare_for_reconnect(&mut self) {
         // Prepare the manager for a new reconnect cycle if reconnects are enabled.
         // The reconnect flow won't begin until the state machine reaches the Disconnected state.
         if self.reconnect_flow_status == ReconnectFlowStatus::Cancelled {
@@ -1297,7 +1298,13 @@ impl LgTvManager {
         }
 
         self.set_reconnect_flow_status(match self.is_auto_reconnect_enabled() {
-            true => ReconnectFlowStatus::Active,
+            true => {
+                if self.is_tv_on_network.load(Ordering::SeqCst) {
+                    ReconnectFlowStatus::Active
+                } else {
+                    ReconnectFlowStatus::WaitingForTvOnNetwork
+                }
+            }
             false => ReconnectFlowStatus::Inactive,
         })
         .await;
@@ -1521,6 +1528,7 @@ impl LgTvManager {
                 match websocket_url_for_connection(&connection) {
                     Ok(url) => {
                         self.connection_details = Some(connection.clone());
+                        info!("NEW CONNECTION DETAILS: {:?}", &self.connection_details);
 
                         // Enable connect retries if requested in the connection settings
                         self.set_reconnect_flow_status(
@@ -1965,6 +1973,10 @@ impl LgTvManager {
         }
 
         self.reconnect_flow_status = reconnect_status;
+        info!(
+            "RECONNECT FLOW STATUS SET: {:?}",
+            &self.reconnect_flow_status
+        );
 
         // Both Active and Cancelled are considered to be part of an active reconnect flow.
         // Cancelled will ultimately become Inactive at which point the flow will no longer be
