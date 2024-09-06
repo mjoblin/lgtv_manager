@@ -179,7 +179,7 @@ impl LgTvWebSocket {
                                     if connection_test_start.is_some() {
                                         warn!("Connection test already in progress");
                                     } else {
-                                        info!("Initiating connection test");
+                                        debug!("Initiating connection test");
 
                                         if let Err(e) = ws_write.send(Message::Ping(vec!())).await {
                                             error!("Failed to send WebSocket ping while testing connection: {:?}", e);
@@ -217,10 +217,10 @@ impl LgTvWebSocket {
                                     }
                                 }
                                 Message::Ping(_) => {
-                                    debug!("WebSocket Ping");
+                                    debug!("Received WebSocket Ping");
                                 }
                                 Message::Pong(_) => {
-                                    debug!("WebSocket Pong");
+                                    debug!("Received WebSocket Pong");
 
                                     // A pong received while testing the connection means the
                                     // connection test passed

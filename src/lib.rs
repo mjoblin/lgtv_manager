@@ -175,8 +175,8 @@ When auto reconnect is enabled, the manager will attempt to reestablish a lost c
 reconnect is attempted after a 5s delay. The manager can be instructed to stop attempting
 reconnects by sending [`ManagerMessage::CancelReconnect`].
 
-The manager will emit [`ManagerOutputMessage::IsReconnectFlowActive`] messages to indicate the
-start and end of the reconnect flow. This is distinct from the manager state, which will continue
+The manager will emit [`ManagerOutputMessage::ReconnectFlowStatus`] messages to indicate the
+current state of the reconnect flow. This is distinct from the manager state, which will continue
 to cycle through the normal connect phases when attempting to reconnect. The reconnect flow will
 end either upon successful connection, or when cancelled with [`ManagerMessage::CancelReconnect`].
 
@@ -513,12 +513,9 @@ pub enum ManagerOutputMessage {
     Error(ManagerError),
     /// Is UPnP discovery being performed.
     IsDiscovering(bool),
-    /// Is the manager's reconnect flow active. The reconnect flow status exists separately from
-    /// the manager status. While the reconnect flow is active, the manager's status will still
-    /// cycle through its normal connect phases (`Connecting`, `Connected`, etc).
-    /// TODO: Deprecate?
-    IsReconnectFlowActive(bool),
-    /// TODO: Document
+    /// The manager's current reconnect flow status. The reconnect flow status exists separately
+    /// from the manager status. While the reconnect flow is active, the manager's status will
+    /// still cycle through its normal connect phases (`Connecting`, `Connected`, etc).
     ReconnectFlowStatus(ReconnectFlowStatus),
     /// Is it possible to wake the last-seen TV from standby.
     IsWakeLastSeenTvAvailable(bool),
@@ -649,9 +646,9 @@ impl LgTvManagerBuilder {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ReconnectFlowStatus {
     Active,
-    WaitingForTvOnNetwork,
     Cancelled,
     Inactive,
+    WaitingForTvOnNetwork,
 }
 
 /// Manage a connection to an LG TV.
@@ -817,15 +814,15 @@ impl LgTvManager {
 
         // Note on retries: Retries are optionally supported for both the initial connection
         //  (ManagerMessage::Connect) and lost connections (WsStatus::ServerClosedConnection). In
-        //  both cases, ReconnectStatus::Active is enabled which will result in an infinite retry
-        //  loop (resetting the manager and trying again to connect) until either: a successful
-        //  connection is achieved (identified by being asked to send a register payload via
-        //  Output::SendRegisterPayload); or the retry loop is cancelled by the caller
+        //  both cases, ReconnectFlowStatus::Active is enabled which will result in an infinite
+        //  retry loop (resetting the manager and trying again to connect) until either: a
+        //  successful connection is achieved (identified by being asked to send a register payload
+        //  via Output::SendRegisterPayload); or the retry loop is cancelled by the caller
         //  (ManagerMessage::CancelReconnect).
         //
-        //  If the TV is no longer on the network, then ReconnectStatus::WaitingForTvOnNetwork is
-        //  set until the TV comes back online (as determined by the TV network checker), at which
-        //  point the above reconnect flow resumes.
+        //  If the TV is no longer on the network, then ReconnectFlowStatus::WaitingForTvOnNetwork
+        //  is set until the TV comes back online (as determined by the TV network checker), at
+        //  which point the above reconnect flow resumes.
 
         let (
             is_tv_on_network,
@@ -1054,7 +1051,7 @@ impl LgTvManager {
                                 )).await;
 
                                 if is_ok {
-                                    info!("Connection test passed");
+                                    debug!("Connection test passed");
                                 } else {
                                     let msg = "Connection test failed";
                                     warn!("{}", &msg);
@@ -1950,13 +1947,9 @@ impl LgTvManager {
             &self.reconnect_flow_status
         );
 
-        // Both Active and Cancelled are considered to be part of an active reconnect flow.
-        // Cancelled will ultimately become Inactive at which point the flow will no longer be
-        // considered active.
         let _ = self
-            .send_out(ManagerOutputMessage::IsReconnectFlowActive(
-                self.reconnect_flow_status == ReconnectFlowStatus::Active
-                    || self.reconnect_flow_status == ReconnectFlowStatus::Cancelled,
+            .send_out(ManagerOutputMessage::ReconnectFlowStatus(
+                self.reconnect_flow_status.clone(),
             ))
             .await;
     }
