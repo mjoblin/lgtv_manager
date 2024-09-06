@@ -2039,15 +2039,6 @@ impl LgTvManager {
             .await;
     }
 
-    // /// Send the current `IsTvOnNetwork` state to the caller.
-    // async fn emit_is_tv_on_network(&mut self) {
-    //     let _ = self
-    //         .send_out(ManagerOutputMessage::IsTvOnNetwork(
-    //             self.is_tv_on_network.load(Ordering::SeqCst),
-    //         ))
-    //         .await;
-    // }
-
     /// Send the current `IsWakeTvAvailable` state to the caller.
     async fn emit_is_wake_tv_available(&mut self) {
         let _ = self
