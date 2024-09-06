@@ -1007,7 +1007,6 @@ impl LgTvManager {
                                 }
                             },
                             Output::HandleDisconnectError => {
-                                self.optionally_prepare_for_reconnect().await;
                                 self.force_manager_reset("A WebSocket disconnect error occurred").await;
                             }
                         }
