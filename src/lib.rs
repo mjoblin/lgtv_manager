@@ -1,8 +1,8 @@
 /*!
 Asynchronous control manager for LG TVs.
 
-The `lgtv_manager` crate provides [`LgTvManager`], which manages an asynchronous interface to LG
-TVs supporting the webOS SSAP WebSocket protocol.
+[`LgTvManager`] manages an asynchronous interface to LG TVs supporting the webOS SSAP WebSocket
+protocol.
 
 ## Features
 
