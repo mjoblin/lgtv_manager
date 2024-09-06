@@ -822,59 +822,22 @@ impl LgTvManager {
         //  connection is achieved (identified by being asked to send a register payload via
         //  Output::SendRegisterPayload); or the retry loop is cancelled by the caller
         //  (ManagerMessage::CancelReconnect).
-
-        // TODO: Start TV alive-check ping task
-        //  - Create mutexes and notifiers
-        //  - Add start_tv_alive_check_task() to (new) tv_alive_check.rs
-
-        // let is_host_alive = Arc::new(Mutex::new(false));
-        // let is_host_alive_notify = Arc::new(Notify::new());
-        // let host_ip: Arc<Mutex<Option<IpAddr>>> = Arc::new(Mutex::new(None));
-        // let host_ip_notify = Arc::new(Notify::new());
         //
-        // let host_ip_clone = Arc::clone(&host_ip);
-        // let host_ip_notify_clone = Arc::clone(&host_ip_notify);
+        //  If the TV is no longer on the network, then ReconnectStatus::WaitingForTvOnNetwork is
+        //  set until the TV comes back online (as determined by the TV network checker), at which
+        //  point the above reconnect flow resumes.
 
-        // let (host_ip, host_ip_notify, is_host_alive_notify, check_now_notify) = start_alive_check_task(Arc::clone(self.is_tv_alive));
-        // let (is_host_alive_notify, check_now_notify) =
-        //     start_alive_check_task(
-        //         Arc::clone(&self.tv_host_ip),
-        //         Arc::clone(&self.tv_host_ip_notifier),
-        //         Arc::clone(&self.start_tv_alive_check),
-        //         Arc::clone(&self.is_tv_alive),
-        //     );
-
-        // let mut tv_alive_checker = TvAliveChecker::new();
         let (
             is_tv_on_network,
             is_tv_on_network_notify,
             is_testing_tv_on_network,
             is_testing_tv_on_network_notify,
         ) = &self.tv_on_network_checker.start();
+
         self.is_tv_on_network = is_tv_on_network.clone();
         self.is_testing_tv_on_network = is_testing_tv_on_network.clone();
 
-        // TODO: Move this to proper location
-        &self
-            .tv_on_network_checker
-            .set_tv_ip(IpAddr::from([192, 168, 3, 101]))
-            .await;
-
         let mut was_on_network = false;
-
-        // let (is_host_alive_notify, check_now_notify) =
-        //     start_alive_check_task(
-        //         Arc::clone(&self.tv_host_ip),
-        //         Arc::clone(&self.tv_host_ip_notifier),
-        //         Arc::clone(&self.start_tv_alive_check),
-        //         Arc::clone(&self.is_tv_alive),
-        //     );
-
-        // {
-        //     let mut ip = self.host_ip.lock().await;
-        //     *ip = Some(IpAddr::from([192, 168, 3, 101]));
-        //     self.host_ip_notifier.notify_one();
-        // }
 
         loop {
             select! {
@@ -1105,48 +1068,43 @@ impl LgTvManager {
                 // FROM THE TV ALIVE-CHECK PING TASK ----------------------------------------------
 
                 _ = is_tv_on_network_notify.notified() => {
-                    // info!("GOT HOST ALIVE INTO MAIN MANAGER: {}", *is_host_alive.lock().await);
+                    // The TV is either on of off the network. This bool state will arrive once per
+                    // ping interval and may not have changed since the last notification.
                     let is_on_network = self.is_tv_on_network.load(Ordering::SeqCst);
-
-                    info!("HOST ALIVE NOTIFY WAS TRIGGERED: {}", is_on_network);
 
                     let _ = self
                         .send_out(ManagerOutputMessage::TvOnNetworkTestStatus(
                             if is_on_network { TestStatus::Passed } else { TestStatus::Failed }
                         )).await;
 
-                    // TODO: Consider IsWakeTvAvailable / IsConnectionOk / IsTvOnNetwork; what do
-                    //  they mean and how to handle them
-                    // self.emit_is_tv_on_network().await;
                     self.emit_is_wake_tv_available().await;
 
+                    // Handle the TV going offline.
                     if was_on_network && !is_on_network {
-                        info!("WAS ALIVE AND IS NOW NOT ON NETWORK...");
+                        debug!("TV no longer on the network");
 
                         if self.manager_status == ManagerStatus::Disconnected {
-                            info!("   ... WAS DISCONNECTED; SETTING RECONNECT STATUS");
                             self.set_reconnect_flow_status(match self.is_auto_reconnect_enabled() {
                                 true => ReconnectFlowStatus::WaitingForTvOnNetwork,
                                 false => ReconnectFlowStatus::Inactive,
                             })
                             .await;
-                            info!("   ... RECONNECT STATUS IS NOW: {:?}", &self.reconnect_flow_status);
                         } else {
-                            info!("   ... WAS NOT DISCONNECTED; ATTEMPTING FSM ERROR FLOW");
                             self.attempt_fsm_error(
                                 ManagerError::Connection("TV host is not available on the network".into())
                             ).await;
                         }
                     }
 
+                    // Handle the TV coming back online.
                     if !was_on_network && is_on_network {
-                        info!("WAS NOT ON NETWORK BUT IS NOW ON NETWORK: {:?}", &self.reconnect_flow_status);
+                        debug!("TV is on the network again; reconnect status: {:?}", &self.reconnect_flow_status);
                     }
 
                     let is_waiting_for_tv= self.reconnect_flow_status == ReconnectFlowStatus::WaitingForTvOnNetwork;
 
                     if !was_on_network && is_on_network && is_waiting_for_tv {
-                        info!("TV is visible on the network again; restarting reconnect flow");
+                        info!("TV is on the network again; restarting reconnect flow");
                         self.initiate_reconnect().await;
                     }
 
@@ -1154,6 +1112,7 @@ impl LgTvManager {
                 }
 
                 _ = is_testing_tv_on_network_notify.notified() => {
+                    // Notify the caller that a network test is being performed.
                     if self.is_testing_tv_on_network.load(Ordering::SeqCst) {
                         let _ = self
                             .send_out(ManagerOutputMessage::TvOnNetworkTestStatus(
@@ -1529,7 +1488,19 @@ impl LgTvManager {
                 match websocket_url_for_connection(&connection) {
                     Ok(url) => {
                         self.connection_details = Some(connection.clone());
-                        info!("NEW CONNECTION DETAILS: {:?}", &self.connection_details);
+
+                        // Register this connection's IP address with the network checker, but only
+                        // if the checker doesn't have an IP or the IP has changed
+                        if let Some(conn_ip_addr) = url_ip_addr(&url) {
+                            match self.tv_on_network_checker.get_tv_ip().await {
+                                Some(existing_ip) => {
+                                    if conn_ip_addr != existing_ip {
+                                        self.tv_on_network_checker.set_tv_ip(conn_ip_addr).await;
+                                    }
+                                }
+                                None => self.tv_on_network_checker.set_tv_ip(conn_ip_addr).await,
+                            }
+                        }
 
                         // Enable connect retries if requested in the connection settings
                         self.set_reconnect_flow_status(
@@ -1974,8 +1945,8 @@ impl LgTvManager {
         }
 
         self.reconnect_flow_status = reconnect_status;
-        info!(
-            "RECONNECT FLOW STATUS SET: {:?}",
+        debug!(
+            "Reconnect flow status set: {:?}",
             &self.reconnect_flow_status
         );
 
