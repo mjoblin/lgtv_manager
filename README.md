@@ -5,16 +5,27 @@ Asynchronous control manager for LG TVs.
 The `lgtv_manager` crate provides `LgTvManager`, which manages an asynchronous interface to LG
 TVs supporting the webOS SSAP WebSocket protocol.
 
-(`lgtv_manager` has only partial support for the full set of webOS commands; see `TvCommand`.
-This crate was inspired by [LGWebOSRemote](https://github.com/klattimer/LGWebOSRemote), which
-includes additional commands for reference).
+### Features
 
-`LgTvManager`:
+* UPnP discovery of LG TVs.
+* Connection pairing.
+* Sending LG commands to the connected TV.
+* Provides details on the connected TV (software versions, inputs, etc).
+* Automatic reconnects.
+* Wake-on-LAN support.
+* Persists last-connected TV details between sessions.
+
+### Overview
+
+An `LgTvManager` instance:
 
 1. Handles the WebSocket connection to an LG TV, including pairing.
 2. Accepts `ManagerMessage` messages from the caller to:
+    * Perform UPnP discovery of LG TVs.
     * Connect, disconnect, shut down, etc.
-    * Send `TvCommand` messages (e.g. increase volume) to the TV.
+    * Send `TvCommand` messages (e.g. increase volume) to the connected TV.
+    * Perform WebSocket connection or network (ping) tests.
+    * Submit a Wake-on-LAN request to the last-seen TV.
 3. Sends `ManagerOutputMessage` updates back to the caller:
     * After a successful connection:
         * The `LastSeenTv`.
@@ -22,11 +33,15 @@ includes additional commands for reference).
         * The `TvInput` list (e.g. HDMI).
         * The `TvSoftwareInfo` (e.g. webOS version).
         * The `TvState` (e.g. current volume level).
+        * Whether Wake-on-LAN available.
     * As required during the lifetime of a connection:
-        * Updates to the `ManagerStatus`.
+        * Updates to the manager's `ManagerStatus`.
         * Updates to the `TvState`.
-    * Errors.
-4. Supports UPnP discovery of LG TVs.
+        * `TestStatus` updates for regular connection tests and network ping tests.
+    * As required in response to other manager actions:
+        * Discovered UPnP devices (`LgTvDevice`)
+        * `TestStatus` updates for on-demand connection tests and network ping tests.
+    * Any manager or TV errors.
 
 To view the full documentation, clone the repository and run `cargo doc --open`.
 
@@ -44,9 +59,10 @@ Communication with `LgTvManager` is asynchronous. Commands are invoked on the TV
 `ManagerOutputMessage` back to the caller. However, any changes to the TV's state (like a new
 volume setting) will be passed back to the caller via `ManagerOutputMessage::TvState`.
 
-`LgTvManager` also subscribes to volume and mute updates from the TV. This means volume or mute
-changes made by other sources, such as the TV's remote control, will be reflected in `TvState`
-updates. `TvState` contains the entire state of the TV at the time the message was sent.
+`LgTvManager` also subscribes to volume, mute, and power state updates from the TV. This means
+changes to these states made by other sources -- such as the TV's remote control -- will be
+reflected in `TvState` updates. `TvState` contains the entire state of the TV at the time the
+message was sent.
 
 Most use cases will rely on sending `ManagerMessage::SendTvCommand` messages to control the TV;
 and processing any received `ManagerOutputMessage::TvState` messages. This asynchronous pattern
@@ -106,6 +122,7 @@ to_manager
     .send(Connect(Connection::Host(
         "10.0.0.101".into(),
         ConnectionSettingsBuilder::new()
+            .with_no_tls()
             .with_forced_pairing()
             .with_initial_connect_retries()
             .with_auto_reconnect()
@@ -153,7 +170,7 @@ state. The flow is as follows:
 4. `Pairing`
 5. `Initializing`
 6. `Communicating`
-6. `Disconnecting`
+8. `Disconnecting`
 
 Most states can be safely ignored. It is enough to instantiate `LgTvManager`, send a
 `ManagerMessage::Connect` message, and then wait for the manager to enter the `Communicating`
@@ -173,10 +190,13 @@ When auto reconnect is enabled, the manager will attempt to reestablish a lost c
 reconnect is attempted after a 5s delay. The manager can be instructed to stop attempting
 reconnects by sending `ManagerMessage::CancelReconnect`.
 
-The manager will emit `ManagerOutputMessage::IsReconnectFlowActive` messages to indicate the
-start and end of the reconnect flow. This is distinct from the manager state, which will continue
+The manager will emit `ManagerOutputMessage::ReconnectFlowStatus` messages to indicate the
+current state of the reconnect flow. This is distinct from the manager state, which will continue
 to cycle through the normal connect phases when attempting to reconnect. The reconnect flow will
 end either upon successful connection, or when cancelled with `ManagerMessage::CancelReconnect`.
+
+If the TV goes offline then the manager will attempt to ping the TV over the network at regular
+intervals until it responds, at which time standard reconnects will be attempted.
 
 #### Retrying initial connections
 
@@ -198,11 +218,19 @@ It is expected that the most common commands to send to the TV will be those tha
 state (such as `SetMute`, `VolumeUp`, etc). Any changes to the TV's state will be received via
 `TvState` updates from the manager, so invoking the "get" commands is usually not necessary.
 
-### Testing the connection
+### Testing the WebSocket connection
 
-The current validity of a TV connection can be tested using `ManagerMessage::TestConnection`.
-The manager will respond with a boolean `ManagerOutputMessage::IsConnectionOk`. For a connection
-to be valid, the TV must successfully respond to a ping over the existing WebSocket connection.
+The current validity of the WebSocket connection to the TV can be tested using
+`ManagerMessage::TestConnection`. The manager will respond with a
+`ManagerOutputMessage::ConnectionTestStatus`. For a connection test to pass, the TV must respond
+to a WebSocket ping over the existing WebSocket connection.
+
+### Testing the network visibility of the TV
+
+Whether the TV is currently visible on the network can be tested using
+`ManagerMessage::TestTvOnNetwork`. The manager will respond with a
+`ManagerOutputMessage::TvOnNetworkTestStatus`. For a network test to pass, the TV must respond to
+a network ICMP ping.
 
 ### Disconnecting
 
@@ -214,7 +242,7 @@ a disconnect, and can still accept future `ManagerMessage::Connect` messages. Se
 
 The `lgtv_manager` crate is currently limited in scope. It only supports the `TvCommand` list
 found in `src/commands.rs`, and does not provide much in the way of configuration (such as timeout
-durations and automatic reconnects).
+durations, reconnect intervals, etc).
 
 Extending `LgTvManager` to support additional TV commands should be fairly trivial, although
 LG's SSAP protocol does not appear to be documented. A good place to start is the
