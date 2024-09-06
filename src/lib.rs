@@ -987,6 +987,7 @@ impl LgTvManager {
                                 let _ = self.send_to_ws(WsMessage::Payload(payload)).await;
                             },
                             Output::DisconnectFromTv => {
+                                self.optionally_prepare_for_reconnect().await;
                                 self.initiate_disconnect_from_tv().await;
                             },
                             Output::HandleSuccessfulDisconnect => {
@@ -1006,6 +1007,7 @@ impl LgTvManager {
                                 }
                             },
                             Output::HandleDisconnectError => {
+                                self.optionally_prepare_for_reconnect().await;
                                 self.force_manager_reset("A WebSocket disconnect error occurred").await;
                             }
                         }
