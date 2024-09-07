@@ -42,7 +42,8 @@ impl TvNetworkChecker {
     }
 
     /// Start the network checker task. The task will run forever, checking the provided IP address
-    /// at regular intervals and immediately on request.
+    /// at regular intervals and immediately on request. The IP address can be changed while the
+    /// checker task is running.
     pub fn start(
         &mut self,
     ) -> Result<(Arc<AtomicBool>, Arc<Notify>, Arc<AtomicBool>, Arc<Notify>), io::Error> {
