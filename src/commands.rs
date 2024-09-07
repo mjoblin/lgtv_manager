@@ -14,6 +14,7 @@ use crate::{
 };
 
 const GET_VOLUME_SUBSCRIPTION_ID: &str = "get_volume_subscription";
+const GET_POWER_STATE_SUBSCRIPTION_ID: &str = "get_power_state_subscription";
 
 /// LG control commands.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -48,6 +49,9 @@ pub enum TvCommand {
     /// Subscribe to volume updates, including mute.
     #[doc(hidden)]
     SubscribeGetVolume,
+    /// Subscribe to power state updates.
+    #[doc(hidden)]
+    SubscribeGetPowerState,
     /// Switch to the given input id on the TV.
     SwitchInput(String),
     /// Turn off the TV.
@@ -223,6 +227,16 @@ impl From<TvCommand> for String {
                     r#type: LgTvRequestType::Subscribe,
                     id: GET_VOLUME_SUBSCRIPTION_ID.into(),
                     uri: Some("ssap://audio/getVolume".to_string()),
+                    payload: None,
+                };
+
+                serde_json::to_string(&data).unwrap_or_else(|_| String::new())
+            }
+            TvCommand::SubscribeGetPowerState => {
+                let data = LgTvRequest {
+                    r#type: LgTvRequestType::Subscribe,
+                    id: GET_POWER_STATE_SUBSCRIPTION_ID.into(),
+                    uri: Some("ssap://com.webos.service.tvpower/power/getPowerState".to_string()),
                     payload: None,
                 };
 
@@ -436,6 +450,16 @@ mod tests {
         assert_eq!(
             payload,
             r#"{"type":"subscribe","id":"get_volume_subscription","uri":"ssap://audio/getVolume","payload":null}"#
+        );
+    }
+
+    #[test]
+    fn payload_subscribe_get_power_state() {
+        let payload: String = TvCommand::SubscribeGetPowerState.into();
+
+        assert_eq!(
+            payload,
+            r#"{"type":"subscribe","id":"get_power_state_subscription","uri":"ssap://com.webos.service.tvpower/power/getPowerState","payload":null}"#
         );
     }
 

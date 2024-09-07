@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use directories::ProjectDirs;
 use log::debug;
+use macaddr::MacAddr;
 use serde::{Deserialize, Serialize};
 
 use crate::messages::GetSystemInfoPayload;
@@ -15,6 +16,7 @@ const PERSISTED_STATE_FILE: &str = "lgtv_manager_data.json";
 pub struct LastSeenTv {
     pub websocket_url: Option<String>,
     pub client_key: Option<String>,
+    pub mac_addr: Option<MacAddr>,
 }
 
 /// Current TV state for the managed LG TV.
@@ -52,6 +54,7 @@ impl From<GetSystemInfoPayload> for TvInfo {
 pub(crate) struct PersistedState {
     pub ws_url: Option<String>,
     pub client_key: Option<String>,
+    pub mac_addr: Option<String>,
 }
 
 // ------------------------------------------------------------------------------------------------0
@@ -81,11 +84,12 @@ pub(crate) fn write_persisted_state(
 ) -> Result<(), String> {
     let data_file = get_data_file(data_dir)?;
 
-    return match File::create(data_file) {
+    match File::create(data_file) {
         Ok(mut file) => {
             let persisted_state = PersistedState {
                 ws_url: state.ws_url.clone(),
                 client_key: state.client_key.clone(),
+                mac_addr: state.mac_addr.clone(),
             };
 
             match serde_json::to_string(&persisted_state) {
@@ -97,7 +101,7 @@ pub(crate) fn write_persisted_state(
             }
         }
         Err(e) => Err(format!("Error writing persisted state: {:?}", e)),
-    };
+    }
 }
 
 /// Get the path to the data file as a PathBuf, creating the directory if necessary.
