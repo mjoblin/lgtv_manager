@@ -670,6 +670,11 @@ impl LgTvManagerBuilder {
 //    in the "Disconnected" state, the "Connect" Input will transition the state machine into the
 //    "Connecting" state *and* emit the "ConnectToTv" Output. The "ConnectToTv" output is then
 //    received by the manager, which proceeds to initiate the WebSocket connection.
+//  - The manager is concerned with two "alive" states:
+//      - The WebSocket connection to the TV (validated with WebSocket Ping/Pong).
+//      - The TV being visible on the network (validated with ICMP ping).
+//  - If the manager unexpectedly loses the connection to the TV then it will enter a reconnect
+//    loop.
 //  - If anything unrecoverable happens, then the manager enters the Zombie state and can no
 //    longer do anything useful.
 

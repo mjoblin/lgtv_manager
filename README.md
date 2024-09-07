@@ -8,9 +8,10 @@ protocol.
 ### Features
 
 * UPnP discovery of LG TVs.
+* Connect to TV using discovered UPnP device details or host IP.
 * Connection pairing.
 * Sending LG commands to the connected TV.
-* Provides details on the connected TV (software versions, inputs, etc).
+* Details on the connected TV (software versions, inputs, etc).
 * Automatic reconnects.
 * Wake-on-LAN support.
 * Persists last-connected TV details between sessions.
