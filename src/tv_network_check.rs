@@ -3,12 +3,15 @@
 //! This is effectively a network ping check for a TV, and does not use or rely on the SSAP
 //! WebSocket layer.
 
-use log::{debug, error, info, warn};
+use std::io;
 use std::net::IpAddr;
 use std::pin::pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use surge_ping::{Client, Config, PingIdentifier};
+
+use log::{debug, error, info, warn};
+use rand::random;
+use surge_ping::{Client, Config, PingIdentifier, PingSequence};
 use tokio::{
     select,
     sync::{Mutex, Notify},
@@ -40,7 +43,9 @@ impl TvNetworkChecker {
 
     /// Start the network checker task. The task will run forever, checking the provided IP address
     /// at regular intervals and immediately on request.
-    pub fn start(&mut self) -> (Arc<AtomicBool>, Arc<Notify>, Arc<AtomicBool>, Arc<Notify>) {
+    pub fn start(
+        &mut self,
+    ) -> Result<(Arc<AtomicBool>, Arc<Notify>, Arc<AtomicBool>, Arc<Notify>), io::Error> {
         let is_tv_on_network = Arc::clone(&self.is_tv_on_network);
         let is_tv_on_network_notify = Arc::clone(&self.is_tv_on_network_notify);
         let tv_ip = Arc::clone(&self.tv_ip);
@@ -52,13 +57,12 @@ impl TvNetworkChecker {
         let is_pinging_notify = Arc::new(Notify::new());
         let is_pinging_notify_clone = Arc::clone(&is_pinging_notify);
 
+        let ping_client = Client::new(&Config::default())?;
+
         tokio::spawn(async move {
             info!("Starting TV network checker");
 
             let mut ping_target_ip: Option<IpAddr> = None;
-
-            // TODO: Check unwrap()
-            let ping_client = Client::new(&Config::default()).unwrap();
             let mut ping_interval = tokio::time::interval(Duration::from_secs(ONE_MINUTE_SECS));
 
             loop {
@@ -87,7 +91,7 @@ impl TvNetworkChecker {
 
                     // Ping the TV immediately on request.
                     _ = check.notified() => {
-                        debug!("Immediate ping check requested");
+                        debug!("Immediate network ping check requested");
 
                         if let Some(target_ip) = ping_target_ip {
                             TvNetworkChecker::check_tv(
@@ -106,12 +110,12 @@ impl TvNetworkChecker {
             }
         });
 
-        (
+        Ok((
             self.is_tv_on_network.clone(),
             self.is_tv_on_network_notify.clone(),
             is_pinging_clone,
             is_pinging_notify_clone,
-        )
+        ))
     }
 
     /// Set the IP address of the TV to check.
@@ -149,7 +153,7 @@ impl TvNetworkChecker {
         is_pinging_notify: Arc<Notify>,
     ) {
         if is_pinging.load(Ordering::SeqCst) {
-            warn!("Ping check is already in progress; not starting new check");
+            warn!("Network ping check is already in progress; not starting new check");
             return;
         }
 
@@ -157,16 +161,17 @@ impl TvNetworkChecker {
         is_pinging_notify.notify_one();
 
         let ping_payload = [0; 8];
-        let mut pinger = ping_client.pinger(tv_ip, PingIdentifier::from(1)).await;
+        let mut pinger = ping_client.pinger(tv_ip, PingIdentifier(random())).await;
 
-        // TODO: Look into what the first parameter should be
-        match pinger.ping(1.into(), &ping_payload).await {
+        debug!("Initiating TV network ping test");
+
+        match pinger.ping(PingSequence(0), &ping_payload).await {
             Ok(_) => {
-                debug!("TV responded to ping");
+                debug!("TV responded to network ping");
                 is_tv_on_network.store(true, Ordering::SeqCst);
             }
             Err(e) => {
-                info!("TV did not respond to ping: {:?}", e);
+                info!("TV did not respond to network ping: {:?}", e);
                 is_tv_on_network.store(false, Ordering::SeqCst);
             }
         }

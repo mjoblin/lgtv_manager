@@ -19,6 +19,7 @@ log = "0.4.22"
 macaddr = "1.0.1"
 native-tls = "0.2.12"
 pin-utils = "0.1.0"
+rand = "0.8.5"
 rupnp = { version = "2.0.0", features = ["full_device_spec"] }
 rust-fsm = "0.7.0"
 rust-fsm-dsl = "0.7.0"

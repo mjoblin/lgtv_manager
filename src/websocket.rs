@@ -177,9 +177,9 @@ impl LgTvWebSocket {
                                 }
                                 WsMessage::TestConnection => {
                                     if connection_test_start.is_some() {
-                                        warn!("Connection test already in progress");
+                                        warn!("WebSocket connection test already in progress");
                                     } else {
-                                        debug!("Initiating connection test");
+                                        debug!("Initiating WebSocket connection test");
 
                                         if let Err(e) = ws_write.send(Message::Ping(vec!())).await {
                                             error!("Failed to send WebSocket ping while testing connection: {:?}", e);

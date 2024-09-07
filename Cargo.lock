@@ -606,6 +606,7 @@ dependencies = [
  "macaddr",
  "native-tls",
  "pin-utils",
+ "rand",
  "rupnp",
  "rust-fsm",
  "rust-fsm-dsl",
