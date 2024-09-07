@@ -456,6 +456,7 @@ mod websocket;
 use std::cmp::PartialEq;
 use std::net::IpAddr;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -465,6 +466,7 @@ use helpers::{
     generate_lgtv_message_id, generate_register_request, url_ip_addr, websocket_url_for_connection,
 };
 use log::{debug, error, info, warn};
+use macaddr::MacAddr;
 use messages::{LgTvResponse, LgTvResponsePayload};
 use state::{read_persisted_state, write_persisted_state, PersistedState};
 use state_machine::{start_state_machine, Input, Output, State, StateMachineUpdateMessage};
@@ -479,7 +481,7 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tv_network_check::TvNetworkChecker;
 use websocket::{LgTvWebSocket, WsCommand, WsMessage, WsStatus, WsUpdateMessage};
-use wol::{send_wol, MacAddr};
+use wol::send_wol;
 
 pub use commands::TvCommand;
 pub use connection_settings::{Connection, ConnectionSettings, ConnectionSettingsBuilder};
@@ -528,7 +530,9 @@ pub enum ManagerMessage {
     TestConnection,
     /// Test whether the TV is visible on the network.
     TestTvOnNetwork,
-    /// Send a Wake-on-LAN network request to the last-seen TV to wake from standby.
+    /// Send a Wake-on-LAN network request to the last-seen TV to wake from standby. Wake-on-LAN is
+    /// unavailable when the TV is fully powered off (not responding to pings), or if the MAC
+    /// address is unknown.
     WakeLastSeenTv,
 }
 
@@ -711,7 +715,7 @@ pub struct LgTvManager {
     tv_software_info: Option<TvSoftwareInfo>,
     tv_state: TvState,
     client_key: Option<String>, // Unique LG client key, provided by the TV after pairing
-    mac_addr: Option<String>,   // MAC address of the TV, provided by UPnP discovery
+    mac_addr: Option<MacAddr>,  // MAC address of the TV, provided by UPnP discovery
     connection_details: Option<Connection>, // LgTvManager only handles up to 1 connection at a time
     last_good_connection: Option<Connection>,
     tv_host_ip: Arc<Mutex<Option<IpAddr>>>,
@@ -1572,7 +1576,9 @@ impl LgTvManager {
                                                 &persisted.mac_addr,
                                             );
 
-                                            persisted.mac_addr
+                                            persisted.mac_addr.as_ref().and_then(|mac_addr| {
+                                                MacAddr::from_str(mac_addr).ok()
+                                            })
                                         } else {
                                             None
                                         }
@@ -1580,7 +1586,11 @@ impl LgTvManager {
                                     Err(_) => None,
                                 }
                             }
-                            Connection::Device(device, _) => device.mac_addr.clone(),
+                            Connection::Device(device, _) => {
+                                device.mac_addr.and_then(|mac_addr_string| {
+                                    MacAddr::from_str(&mac_addr_string).ok()
+                                })
+                            }
                         };
 
                         Ok(())
@@ -1859,7 +1869,7 @@ impl LgTvManager {
                     if let (Some(ip), Ok(mac)) = (url_ip_addr(&ws_url), mac_addr.parse()) {
                         info!("Sending Wake-on-LAN to {}, {}", &ip, &mac);
 
-                        if let Err(e) = send_wol(MacAddr::from(mac), Some(ip), None) {
+                        if let Err(e) = send_wol(wol::MacAddr::from(mac), Some(ip), None) {
                             result_msg = Some(format!("Send error: {}", e))
                         }
                     } else {
@@ -2013,7 +2023,7 @@ impl LgTvManager {
                 *host_ip = Some(ip_addr);
 
                 // Inform the TV network checker of the new IP.
-                &self.tv_host_ip_notifier.notify_one();
+                self.tv_host_ip_notifier.notify_one();
             }
         }
     }
@@ -2024,7 +2034,10 @@ impl LgTvManager {
             .send_out(ManagerOutputMessage::LastSeenTv(LastSeenTv {
                 websocket_url: self.ws_url.clone(),
                 client_key: self.client_key.clone(),
-                mac_addr: self.mac_addr.clone(),
+                mac_addr: match self.mac_addr {
+                    Some(mac_addr) => Some(mac_addr),
+                    None => None,
+                },
             }))
             .await;
     }
@@ -2074,7 +2087,9 @@ impl LgTvManager {
             Ok(persisted_state) => {
                 self.ws_url = persisted_state.ws_url;
                 self.client_key = persisted_state.client_key;
-                self.mac_addr = persisted_state.mac_addr;
+                self.mac_addr = persisted_state
+                    .mac_addr
+                    .and_then(|mac_addr_string| MacAddr::from_str(&mac_addr_string).ok());
             }
             Err(e) => {
                 warn!("Could not import persisted state: {}", e);
@@ -2088,7 +2103,7 @@ impl LgTvManager {
             PersistedState {
                 ws_url: self.ws_url.clone(),
                 client_key: self.client_key.clone(),
-                mac_addr: self.mac_addr.clone(),
+                mac_addr: self.mac_addr.map(|mac_addr| mac_addr.to_string()),
             },
             self.data_dir.clone(),
         ) {

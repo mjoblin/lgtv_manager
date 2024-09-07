@@ -5,11 +5,10 @@
 
 use std::io;
 use std::net::IpAddr;
-use std::pin::pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use log::{debug, error, info, warn};
+use log::{debug, info, warn};
 use rand::random;
 use surge_ping::{Client, Config, PingIdentifier, PingSequence};
 use tokio::{

@@ -2,14 +2,17 @@
 
 use std::collections::HashSet;
 use std::fmt;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::IpAddr;
 use std::process::Command;
+use std::str::FromStr;
 use std::time::Duration;
 
 use futures::prelude::*;
 use log::{error, info, warn};
 use macaddr::MacAddr;
 use rupnp::ssdp::{SearchTarget, URN};
+
+use crate::helpers::url_ip_addr;
 
 const DISCOVERY_DURATION_SECS: u64 = 3;
 const MEDIA_RENDERER: URN = URN::device("schemas-upnp-org", "MediaRenderer", 1);
@@ -36,18 +39,18 @@ impl fmt::Display for LgTvDevice {
 ///
 /// This uses the "arp" CLI tool assumed to be available from the OS. If that tool is not
 /// available, or if the MAC address was otherwise not determined, then None is returned.
-pub(crate) fn mac_address_for_ip(ip: IpAddr) -> Option<String> {
+pub(crate) fn mac_address_for_ip(ip: IpAddr) -> Option<MacAddr> {
     match Command::new("arp").arg("-n").arg(ip.to_string()).output() {
-        Ok(output) => {
-            let output_str = String::from_utf8_lossy(&output.stdout);
+        Ok(arp_cmd_output) => {
+            let output_str = String::from_utf8_lossy(&arp_cmd_output.stdout);
 
             for line in output_str.lines() {
                 if line.contains(&ip.to_string()) {
-                    let parts: Vec<&str> = line.trim().split_whitespace().collect();
+                    let output_chunks: Vec<&str> = line.trim().split_whitespace().collect();
 
-                    for part in parts {
-                        if part.parse::<MacAddr>().is_ok() {
-                            return Some(part.into());
+                    for output_chunk in output_chunks {
+                        if output_chunk.parse::<MacAddr>().is_ok() {
+                            return MacAddr::from_str(output_chunk).ok();
                         }
                     }
 
@@ -110,7 +113,9 @@ pub(crate) async fn discover_lgtv_devices() -> Result<Vec<LgTvDevice>, String> {
                         serial_number: device.serial_number().map(|s| s.to_owned()),
                         url: device.url().to_string(),
                         udn: device.udn().to_string(),
-                        mac_addr: mac_address_for_ip(IpAddr::V4(Ipv4Addr::new(192, 168, 3, 101))),
+                        mac_addr: url_ip_addr(&device.url().to_string())
+                            .and_then(|ip_addr| mac_address_for_ip(ip_addr))
+                            .map(|mac_addr| mac_addr.to_string()),
                     };
 
                     info!(
