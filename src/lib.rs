@@ -1286,10 +1286,10 @@ impl LgTvManager {
         false
     }
 
-    /// TODO: Docs
+    /// Prepare the manager for a new reconnect cycle if reconnects are enabled.
+    ///
+    /// The reconnect flow won't begin until the state machine reaches the Disconnected state.
     async fn optionally_prepare_for_reconnect(&mut self) {
-        // Prepare the manager for a new reconnect cycle if reconnects are enabled.
-        // The reconnect flow won't begin until the state machine reaches the Disconnected state.
         if self.reconnect_flow_status == ReconnectFlowStatus::Cancelled {
             return;
         }
@@ -1654,7 +1654,7 @@ impl LgTvManager {
         }
     }
 
-    /// Initialize the manager from a new WebSocket connection.
+    /// Initialize the manager with TV information retrieved from a new WebSocket connection.
     ///
     /// Performs steps that need to take place at the beginning of a new TV connection, such as
     /// retrieving TV details and subscribing to TV updates.
@@ -1686,8 +1686,6 @@ impl LgTvManager {
         if let Some(current_connection) = &self.connection_details {
             self.last_good_connection = Some(current_connection.clone());
         }
-
-        // TODO: Inform ping task of the new host to ping
     }
 
     /// Initiate a disconnect from the TV.
@@ -2002,12 +2000,14 @@ impl LgTvManager {
             .await;
     }
 
-    /// TODO: Document
+    /// Determine the TV host_ip (an IpAddr) from the current WebSocket URL (a String).
     async fn set_host_ip_from_ws_url(&mut self) {
         if let Some(ws_url) = &self.ws_url {
             if let Some(ip_addr) = url_ip_addr(ws_url) {
                 let mut host_ip = self.tv_host_ip.lock().await;
                 *host_ip = Some(ip_addr);
+
+                // Inform the TV network checker of the new IP.
                 &self.tv_host_ip_notifier.notify_one();
             }
         }
