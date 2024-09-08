@@ -1,4 +1,4 @@
-//! Manages a WebSocket connection to an LG TV.
+//! Manages a WebSocket client connection to an LG TV.
 //!
 //! Does not have any awareness of the LG protocol. This WebSocket client manager only understands
 //! sending and receiving Strings. See [`crate::lgtv_manager::messages`] for the LG-specific payload

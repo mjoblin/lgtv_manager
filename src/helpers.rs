@@ -7,7 +7,7 @@ use url::{Host, Url};
 #[cfg(not(test))]
 use uuid::Uuid;
 
-use crate::messages::{LgTvRequest, LgTvRequestType};
+use crate::ssap_payloads::{LgTvRequest, LgTvRequestType};
 use crate::{Connection, LgTvDevice};
 
 // This LG TV register payload seems to be used by various projects which talk to LG TVs over the
