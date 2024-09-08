@@ -9,8 +9,8 @@ use std::fmt;
 use serde_json::{Map, Value};
 
 use crate::{
-    generate_lgtv_message_id,
-    messages::{LgTvRequest, LgTvRequestType},
+    helpers::generate_lgtv_message_id,
+    ssap_payloads::{LgTvRequest, LgTvRequestType},
 };
 
 const GET_VOLUME_SUBSCRIPTION_ID: &str = "get_volume_subscription";

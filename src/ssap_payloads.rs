@@ -1,4 +1,4 @@
-//! Message payloads for the LG TV WebSocket protocol.
+//! Message payloads for the LG TV SSAP WebSocket protocol.
 //!
 //! These messages define the shape of the [`LgTvRequest`] and [`LgTvResponse`] payloads sent to and
 //! received from an LG TV over its WebSocket connection.
