@@ -401,7 +401,9 @@ impl LgTvManager {
     /// interval has passed, it initiates a conventional Connect flow using the previously-provided
     /// `Connection` details.
     pub(crate) async fn initiate_reconnect(&mut self, immediate: bool) {
-        if !self.is_tv_on_network.load(Ordering::SeqCst) {
+        if !self.is_tv_on_network.load(Ordering::SeqCst)
+            && self.tv_on_network_checker.is_operational
+        {
             warn!("Preventing reconnect attempt while TV host is down");
             return;
         }

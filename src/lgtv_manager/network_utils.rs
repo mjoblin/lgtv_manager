@@ -126,14 +126,25 @@ impl LgTvManager {
     /// Prepare the manager for a new reconnect cycle if reconnects are enabled.
     ///
     /// The reconnect flow won't begin until the state machine reaches the Disconnected state.
+    ///
+    /// A reconnect flow will not be initiated if the caller has requested a manual disconnect or
+    /// if an existing reconnect flow has been cancelled.
     pub(crate) async fn optionally_prepare_for_reconnect(&mut self) {
-        if self.reconnect_flow_status == ReconnectFlowStatus::Cancelled {
+        if self.is_manual_disconnect_requested
+            || self.reconnect_flow_status == ReconnectFlowStatus::Cancelled
+        {
             return;
         }
 
         self.set_reconnect_flow_status(match self.is_auto_reconnect_enabled() {
             true => {
                 if self.is_tv_on_network.load(Ordering::SeqCst) {
+                    ReconnectFlowStatus::Active
+                } else if !self.is_tv_on_network.load(Ordering::SeqCst)
+                    && !self.tv_on_network_checker.is_operational
+                {
+                    // TV network checker isn't running, so we have to fall back on Active to
+                    // ensure reconnects are still attempted
                     ReconnectFlowStatus::Active
                 } else {
                     ReconnectFlowStatus::WaitingForTvOnNetwork

@@ -21,6 +21,7 @@ const ONE_MINUTE_SECS: u64 = 60;
 
 pub(crate) struct TvNetworkChecker {
     pub is_tv_on_network: Arc<AtomicBool>,
+    pub is_operational: bool,
 
     check: Arc<Notify>,
     is_tv_on_network_notify: Arc<Notify>,
@@ -32,6 +33,7 @@ impl TvNetworkChecker {
     pub fn new() -> Self {
         TvNetworkChecker {
             is_tv_on_network: Arc::new(AtomicBool::new(false)),
+            is_operational: false,
 
             check: Arc::new(Notify::new()),
             is_tv_on_network_notify: Arc::new(Notify::new()),
@@ -58,6 +60,8 @@ impl TvNetworkChecker {
         let is_pinging_notify_clone = Arc::clone(&is_pinging_notify);
 
         let ping_client = Client::new(&Config::default())?;
+
+        self.is_operational = true;
 
         tokio::spawn(async move {
             info!("Starting TV network checker");
