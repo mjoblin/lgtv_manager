@@ -220,6 +220,7 @@ pub struct LgTvManager {
     tv_host_ip: Arc<Mutex<Option<IpAddr>>>,
     tv_host_ip_notifier: Arc<Notify>,
     is_connection_initialized: bool, // TV connection has been made and initial setup commands are sent
+    is_manual_disconnect_requested: bool, // Caller requested a manual disconnect
     tv_on_network_checker: TvNetworkChecker,
     is_testing_tv_on_network: Arc<AtomicBool>,
     is_tv_on_network: Arc<AtomicBool>,
@@ -286,6 +287,7 @@ impl LgTvManager {
             tv_host_ip: Arc::new(Mutex::new(None)),
             tv_host_ip_notifier: Arc::new(Notify::new()),
             is_connection_initialized: false,
+            is_manual_disconnect_requested: false,
             tv_on_network_checker: TvNetworkChecker::new(),
             is_testing_tv_on_network: Arc::new(AtomicBool::new(false)),
             is_tv_on_network: Arc::new(AtomicBool::new(false)),
@@ -419,6 +421,7 @@ impl LgTvManager {
                             }
                         }
                         ManagerMessage::Disconnect => {
+                            self.is_manual_disconnect_requested = true;
                             let _ = self.send_to_fsm(Input::Disconnect).await;
                         }
                         ManagerMessage::Discover => {
@@ -502,6 +505,7 @@ impl LgTvManager {
                             },
                             Output::HandleSuccessfulDisconnect => {
                                 // A clean WebSocket disconnect has taken place
+                                self.is_manual_disconnect_requested = false;
                                 self.handle_successful_disconnect().await;
                             },
                             Output::HandleConnectError => {
@@ -517,6 +521,7 @@ impl LgTvManager {
                                 }
                             },
                             Output::HandleDisconnectError => {
+                                self.is_manual_disconnect_requested = false;
                                 self.force_manager_reset("A WebSocket disconnect error occurred").await;
                             }
                         }
@@ -648,7 +653,7 @@ impl LgTvManager {
                         debug!("TV is on the network again; reconnect status: {:?}", &self.reconnect_flow_status);
                     }
 
-                    let is_waiting_for_tv= self.reconnect_flow_status == ReconnectFlowStatus::WaitingForTvOnNetwork;
+                    let is_waiting_for_tv = self.reconnect_flow_status == ReconnectFlowStatus::WaitingForTvOnNetwork;
 
                     if !was_on_network && is_on_network && is_waiting_for_tv {
                         info!("TV is on the network again; restarting reconnect flow");
