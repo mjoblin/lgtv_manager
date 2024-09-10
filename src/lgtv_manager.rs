@@ -397,7 +397,9 @@ impl LgTvManager {
                 Some(manager_msg) = self.command_rx.recv() => {
                     match manager_msg {
                         ManagerMessage::CancelReconnect => {
-                            if self.reconnect_flow_status == ReconnectFlowStatus::Active {
+                            if self.reconnect_flow_status == ReconnectFlowStatus::Active ||
+                                self.reconnect_flow_status == ReconnectFlowStatus::WaitingForTvOnNetwork
+                            {
                                 info!("Disabling reconnects");
                                 self.set_reconnect_flow_status(ReconnectFlowStatus::Cancelled).await;
                             } else {
