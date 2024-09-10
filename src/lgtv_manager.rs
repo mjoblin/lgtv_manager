@@ -400,8 +400,14 @@ impl LgTvManager {
                             if self.reconnect_flow_status == ReconnectFlowStatus::Active ||
                                 self.reconnect_flow_status == ReconnectFlowStatus::WaitingForTvOnNetwork
                             {
+                                let was_waiting = self.reconnect_flow_status == ReconnectFlowStatus::WaitingForTvOnNetwork;
+
                                 info!("Disabling reconnects");
                                 self.set_reconnect_flow_status(ReconnectFlowStatus::Cancelled).await;
+
+                                if was_waiting {
+                                    self.force_manager_reset("Cancel called while waiting for TV on network").await;
+                                }
                             } else {
                                 warn!("Cannot disable reconnects while manager is not attempting to reconnect");
                             }
