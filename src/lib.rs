@@ -463,6 +463,6 @@ pub use lgtv_manager::{
 };
 pub use lgtv_manager_builder::LgTvManagerBuilder;
 pub use ssap_payloads::{CurrentSwInfoPayload as TvSoftwareInfo, ExternalInput as TvInput};
-pub use state::{LastSeenTv, TvInfo, TvState};
+pub use state::{LastSeenTv, PowerState, TvInfo, TvState};
 pub use state_machine::{ReconnectDetails, State as ManagerStatus};
 pub use tv_commands::TvCommand;

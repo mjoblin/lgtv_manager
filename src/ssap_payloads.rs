@@ -172,9 +172,10 @@ pub(crate) struct GetExternalInputListPayload {
 
 // GetPowerState
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct GetPowerStatePayload {
     pub state: String,
+    pub processing: Option<String>,
     #[serde(rename = "returnValue")]
     pub return_value: bool,
 }
