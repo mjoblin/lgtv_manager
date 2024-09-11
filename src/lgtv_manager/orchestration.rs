@@ -14,7 +14,7 @@ use crate::ssap_payloads::{LgTvResponse, LgTvResponsePayload};
 use crate::state_machine::{Input, State};
 use crate::websocket_client::{LgTvWebSocket, WsCommand, WsMessage};
 use crate::{
-    Connection, ManagerError, ManagerOutputMessage, ManagerStatus, PowerState, ReconnectDetails,
+    Connection, ManagerError, ManagerOutputMessage, ManagerStatus, ReconnectDetails,
     ReconnectFlowStatus, TvCommand,
 };
 
