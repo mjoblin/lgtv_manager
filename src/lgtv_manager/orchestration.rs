@@ -14,7 +14,7 @@ use crate::ssap_payloads::{LgTvResponse, LgTvResponsePayload};
 use crate::state_machine::{Input, State};
 use crate::websocket_client::{LgTvWebSocket, WsCommand, WsMessage};
 use crate::{
-    Connection, ManagerError, ManagerOutputMessage, ManagerStatus, ReconnectDetails,
+    Connection, ManagerError, ManagerOutputMessage, ManagerStatus, PowerState, ReconnectDetails,
     ReconnectFlowStatus, TvCommand,
 };
 
@@ -260,7 +260,7 @@ impl LgTvManager {
                         self.emit_tv_inputs().await;
                     }
                     LgTvResponsePayload::GetPowerState(power_state_payload) => {
-                        self.tv_state.power_state = Some(power_state_payload.state.clone());
+                        self.tv_state.power_state = Some((*power_state_payload).clone().into());
                         self.emit_tv_state().await;
                     }
                     LgTvResponsePayload::GetSystemInfo(system_info_payload) => {

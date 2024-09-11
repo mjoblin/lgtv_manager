@@ -1,6 +1,6 @@
 use macaddr::MacAddr;
 
-use crate::ssap_payloads::GetSystemInfoPayload;
+use crate::ssap_payloads::{GetPowerStatePayload, GetSystemInfoPayload};
 
 /// Information on the TV last connected to by the Manager.
 #[derive(Debug, Default, Clone, PartialEq, Hash)]
@@ -10,10 +10,26 @@ pub struct LastSeenTv {
     pub mac_addr: Option<MacAddr>,
 }
 
+/// Current power state for the managed LG TV.
+#[derive(Debug, Default, Clone, PartialEq, Hash)]
+pub struct PowerState {
+    pub state: String,
+    pub processing: Option<String>,
+}
+
+impl From<GetPowerStatePayload> for PowerState {
+    fn from(power_state: GetPowerStatePayload) -> Self {
+        PowerState {
+            state: power_state.state,
+            processing: power_state.processing,
+        }
+    }
+}
+
 /// Current TV state for the managed LG TV.
 #[derive(Debug, Default, Clone, PartialEq, Hash)]
 pub struct TvState {
-    pub power_state: Option<String>,
+    pub power_state: Option<PowerState>,
     pub volume: Option<u8>,
     pub is_muted: Option<bool>,
     pub is_screen_on: Option<bool>,
