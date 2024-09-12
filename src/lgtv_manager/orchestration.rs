@@ -376,8 +376,10 @@ impl LgTvManager {
         }
     }
 
-    /// Handle a successful disconnect from the WebSocket server.
-    pub(crate) async fn handle_successful_disconnect(&mut self) {
+    /// Handle being disconnected from the WebSocket server.
+    pub(crate) async fn handle_disconnected(&mut self) {
+        debug!("Handling disconnected WebSocket");
+
         if let Some(ws_join_handle) = self.ws_join_handle.take() {
             match ws_join_handle.await {
                 Ok(_) => debug!("WebSocket join handle successfully awaited"),
@@ -388,7 +390,7 @@ impl LgTvManager {
         self.initialize_manager_state().await;
 
         // A lost connection, once detected, still triggers the standard disconnect flow -- so if
-        // we end up here handling a successful disconnect then we may want to trigger a reconnect.
+        // we end up here handling a disconnect then we may want to trigger a reconnect.
         if self.reconnect_flow_status == ReconnectFlowStatus::Active {
             self.initiate_reconnect(false).await;
         }
@@ -489,6 +491,8 @@ impl LgTvManager {
     /// This should trigger an attempt to cleanly shut down an existing WebSocket connected and
     /// return to a clean Disconnected state.
     pub(crate) async fn attempt_fsm_error(&mut self, manager_error: ManagerError) {
+        debug!("Attempting FSM error associated with: {:?}", manager_error);
+
         let _ = self.send_to_fsm(Input::Error).await;
         let _ = self
             .send_out(ManagerOutputMessage::Error(manager_error))

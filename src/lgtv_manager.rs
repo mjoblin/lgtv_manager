@@ -512,9 +512,8 @@ impl LgTvManager {
                                 self.initiate_disconnect_from_tv().await;
                             },
                             Output::HandleSuccessfulDisconnect => {
-                                // A clean WebSocket disconnect has taken place
                                 self.is_manual_disconnect_requested = false;
-                                self.handle_successful_disconnect().await;
+                                self.handle_disconnected().await;
                             },
                             Output::HandleConnectError => {
                                 self.force_manager_reset("A WebSocket connection error occurred").await;
@@ -529,8 +528,9 @@ impl LgTvManager {
                                 }
                             },
                             Output::HandleDisconnectError => {
+                                warn!("A WebSocket disconnect attempt failed");
                                 self.is_manual_disconnect_requested = false;
-                                self.force_manager_reset("A WebSocket disconnect error occurred").await;
+                                self.handle_disconnected().await;
                             }
                         }
                         StateMachineUpdateMessage::TransitionError(error) => {
