@@ -41,7 +41,7 @@ pub(crate) enum StateMachineUpdateMessage {
 pub struct ReconnectDetails {
     pub url: String,
     pub attempts: u64,
-    pub next_attempt_secs: u64,
+    pub next_attempt_ms: u128,
 }
 
 /// Manager status.
@@ -66,7 +66,7 @@ pub enum State {
     // the LgTvManager manages the reconnecting state manually and wants to inform callers about
     // the reconnect status. This is hacky.
     // TODO: Can the reconnect state be formally handled by the state machine in a clean manner.
-    Reconnecting(ReconnectDetails),
+    WaitingToReconnect(ReconnectDetails),
     /// An unrecoverable problem has occurred. The Manager is unresponsive and will only respond
     /// (at best) to `ManagerMessage::ShutDown` requests.
     // Cannot be transitioned into or out of. This state exists only so the LgTvManager can inform

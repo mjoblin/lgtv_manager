@@ -176,12 +176,23 @@ pub(crate) fn device_host(device: &LgTvDevice) -> Result<String, String> {
     }
 }
 
+/// Calculate exponential reconnect falloff in milliseconds.
+pub(crate) fn reconnect_falloff(attempt: u64, min_delay: u64, max_delay: u64) -> u128 {
+    let base_delay: f64 = 0.0;
+    let growth_rate: f64 = 2.0;
+    let skip_count: u64 = 6; // Skip initial very-small values
+
+    let delay = base_delay + growth_rate.powf((attempt + skip_count) as f64);
+
+    delay.min(max_delay as f64).max(min_delay as f64) as u128
+}
+
 // ================================================================================================
 // Tests
 
 #[cfg(test)]
 mod tests {
-    use super::generate_possible_websocket_url;
+    use super::{generate_possible_websocket_url, reconnect_falloff};
 
     #[test]
     fn valid_websocket_url_generation() {
@@ -258,5 +269,14 @@ mod tests {
         assert!(generate_possible_websocket_url("ws://127.0.0.1:8080", true).is_err(),);
 
         assert!(generate_possible_websocket_url("wss://127.0.0.1:8080", false).is_err(),);
+    }
+
+    #[test]
+    fn reconnect_falloff_results() {
+        assert_eq!(reconnect_falloff(0, 250, 10_000), 250);
+        assert_eq!(reconnect_falloff(1, 250, 10_000), 250);
+        assert_eq!(reconnect_falloff(2, 250, 10_000), 256);
+        assert_eq!(reconnect_falloff(3, 250, 10_000), 512);
+        assert_eq!(reconnect_falloff(10_000, 250, 10_000), 10_000);
     }
 }

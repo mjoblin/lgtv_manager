@@ -189,9 +189,10 @@ When the TV closes the connection (e.g. after the TV enters standby), the manage
 default `Disconnected` state. This behavior can be overridden with
 [`ConnectionSettingsBuilder::with_auto_reconnect()`].
 
-When auto reconnect is enabled, the manager will attempt to reestablish a lost connection. Each
-reconnect is attempted after a 5s delay. The manager can be instructed to stop attempting
-reconnects by sending [`ManagerMessage::CancelReconnect`].
+When auto reconnect is enabled, the manager will attempt to reestablish a lost connection. The wait
+time between reconnects will increase exponentially from 250ms to a maximum of 10 seconds. The
+manager can be instructed to stop attempting reconnects by sending
+[`ManagerMessage::CancelReconnect`].
 
 The manager will emit [`ManagerOutputMessage::ReconnectFlowStatus`] messages to indicate the
 current state of the reconnect flow. This is distinct from the manager state, which will continue
