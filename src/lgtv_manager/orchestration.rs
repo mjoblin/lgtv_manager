@@ -1,14 +1,15 @@
 use std::str::FromStr;
 use std::sync::atomic::Ordering;
 use std::time::SystemTime;
-use tokio::sync::mpsc::channel;
-use tokio::time;
+use tokio::{select, sync::mpsc::channel, time};
 
 use log::{debug, error, info, warn};
 use macaddr::MacAddr;
 
 use super::LgTvManager;
-use crate::helpers::{generate_register_request, url_ip_addr, websocket_url_for_connection};
+use crate::helpers::{
+    generate_register_request, reconnect_falloff, url_ip_addr, websocket_url_for_connection,
+};
 use crate::lgtv_manager::read_persisted_state;
 use crate::ssap_payloads::{LgTvResponse, LgTvResponsePayload};
 use crate::state_machine::{Input, State};
@@ -429,45 +430,50 @@ impl LgTvManager {
         };
 
         if let Some(connection_details) = &self.connection_details {
-            let reconnect_start_time = SystemTime::now();
-            let retry_interval = 5;
-            let mut feedback_interval = time::interval(time::Duration::from_secs(1));
-            feedback_interval.tick().await;
-
             if immediate {
                 info!("Attempting immediate reconnect");
             } else {
-                info!("Will attempt reconnect in {retry_interval}s");
-            }
+                let reconnect_start_time = SystemTime::now();
+                let retry_duration = reconnect_falloff(self.reconnect_attempts, 250, 10_000);
+                let mut feedback_interval = time::interval(time::Duration::from_secs(1));
 
-            loop {
-                if immediate {
-                    break;
-                }
+                let mut retry_interval =
+                    time::interval(time::Duration::from_millis(retry_duration as u64));
+                retry_interval.tick().await;
 
-                let now = SystemTime::now();
+                info!("Will attempt reconnect in {retry_duration}ms");
 
-                if let Ok(elapsed_duration) = now.duration_since(reconnect_start_time) {
-                    if elapsed_duration.as_secs() >= retry_interval {
-                        break;
+                loop {
+                    select! {
+                        _ = feedback_interval.tick() => {
+                            // Provide an update to the caller
+                            let now = SystemTime::now();
+
+                            if let Ok(elapsed_duration) = now.duration_since(reconnect_start_time) {
+                                let ms_until_retry = retry_duration.saturating_sub(elapsed_duration.as_millis());
+                                debug!("Time to retry: {ms_until_retry}ms, {:?}", &connection_details);
+
+                                let _ = self
+                                    .send_out(ManagerOutputMessage::Status(ManagerStatus::WaitingToReconnect(
+                                        ReconnectDetails {
+                                            url: url.clone(),
+                                            attempts: self.reconnect_attempts,
+                                            next_attempt_ms: ms_until_retry,
+                                        },
+                                    )))
+                                    .await;
+                            }
+                        }
+
+                        _ = retry_interval.tick() => {
+                            // We're ready to retry
+                            break;
+                        }
                     }
-
-                    let time_to_retry = retry_interval - elapsed_duration.as_secs();
-                    debug!("Time to retry: {time_to_retry}s, {:?}", &connection_details);
-
-                    let _ = self
-                        .send_out(ManagerOutputMessage::Status(ManagerStatus::Reconnecting(
-                            ReconnectDetails {
-                                url: url.clone(),
-                                attempts: self.reconnect_attempts,
-                                next_attempt_secs: time_to_retry,
-                            },
-                        )))
-                        .await;
-
-                    feedback_interval.tick().await;
                 }
             }
+
+            // Initiate another standard connection (i.e. a reconnect in this context)
 
             self.reconnect_attempts += 1;
             info!(
