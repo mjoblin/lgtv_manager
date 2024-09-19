@@ -1,6 +1,6 @@
 use std::sync::atomic::Ordering;
 
-use log::{error, info};
+use log::{info, warn};
 use wol::send_wol;
 
 use crate::discovery::discover_lgtv_devices;
@@ -89,7 +89,7 @@ impl LgTvManager {
 
         if let Some(msg) = result_msg {
             let msg_out = format!("Cannot send Wake-on-LAN: {}", msg);
-            error!("{}", &msg_out);
+            warn!("{}", &msg_out);
 
             let _ = self
                 .send_out(ManagerOutputMessage::Error(ManagerError::Action(

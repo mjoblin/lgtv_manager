@@ -14,7 +14,7 @@
 
 use std::fmt;
 
-use log::{debug, error, info, warn};
+use log::{debug, info, warn};
 use rust_fsm::*;
 use tokio::select;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -359,7 +359,7 @@ pub(crate) fn start_state_machine(
                                 "FSM transition error with Input [{:?}] while in State '{:?}': {:?}",
                                 &input, &fsm.state(), e
                             );
-                            error!("{}", &msg);
+                            warn!("{}", &msg);
 
                             if send_update(
                                 &msg_tx,

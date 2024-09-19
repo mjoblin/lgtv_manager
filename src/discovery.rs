@@ -8,7 +8,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use futures::prelude::*;
-use log::{error, info, warn};
+use log::{info, warn};
 use macaddr::MacAddr;
 use rupnp::ssdp::{SearchTarget, URN};
 
@@ -135,7 +135,7 @@ pub(crate) async fn discover_lgtv_devices() -> Result<Vec<LgTvDevice>, String> {
             }
         }
         Err(e) => {
-            error!("LG TV UPnP discovery error: {:?}", e);
+            warn!("LG TV UPnP discovery error: {:?}", e);
         }
     }
 

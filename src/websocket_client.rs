@@ -22,7 +22,7 @@ use tokio::time::{timeout, Duration};
 use tokio_tungstenite::{
     connect_async_tls_with_config, Connector, MaybeTlsStream, WebSocketStream,
 };
-use tungstenite::{Error, Message};
+use tungstenite::{Error, Message, error::ProtocolError::ResetWithoutClosingHandshake};
 
 // CHANNEL MESSAGES -------------------------------------------------------------------------------
 
@@ -159,7 +159,7 @@ impl LgTvWebSocket {
                                                     info!("WebSocket connection closed");
                                                 },
                                                 Err(e) => {
-                                                    error!("Failed to send WebSocket close message: {:?}", e);
+                                                    warn!("Failed to send WebSocket close message: {:?}", e);
                                                 }
                                             }
 
@@ -182,7 +182,7 @@ impl LgTvWebSocket {
                                         debug!("Initiating WebSocket connection test");
 
                                         if let Err(e) = ws_write.send(Message::Ping(vec!())).await {
-                                            error!("Failed to send WebSocket ping while testing connection: {:?}", e);
+                                            warn!("Failed to send WebSocket ping while testing connection: {:?}", e);
                                             break;
                                         }
 
@@ -198,7 +198,7 @@ impl LgTvWebSocket {
                                         info!("WebSocket connection closed");
                                     },
                                     Err(e) => {
-                                        error!("Failed to send WebSocket close message: {:?}", e);
+                                        warn!("Failed to send WebSocket close message: {:?}", e);
                                     }
                                 }
 
@@ -247,7 +247,17 @@ impl LgTvWebSocket {
                                 }
                             }
                             Err(e) => {
-                                error!("WebSocket message read error: {:?}", &e);
+                                match e {
+                                    Error::Protocol(ResetWithoutClosingHandshake) => {
+                                        // This can occur fairly commonly as computers come in and
+                                        // out of sleep, and isn't considered major.
+                                        warn!("WebSocket reset without closing handshake");
+                                    },
+                                    _ => {
+                                        error!("WebSocket message read error: {:?}", &e);
+                                    }
+                                }
+
                                 let _ = LgTvWebSocket::send_update(
                                     &tx,
                                     WsUpdateMessage::Status(WsStatus::MessageReadError(format!("{e}")))
