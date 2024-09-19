@@ -116,7 +116,8 @@ impl LgTvWebSocket {
             let ws_stream = match LgTvWebSocket::connect(&host, use_tls).await {
                 Ok(ws_stream) => ws_stream,
                 Err(e) => {
-                    error!("{e}");
+                    warn!("Unable to connect to TV: {e}");
+
                     let _ = LgTvWebSocket::send_update(
                         &tx,
                         WsUpdateMessage::Status(WsStatus::ConnectError(e)),
@@ -343,15 +344,15 @@ impl LgTvWebSocket {
                         let error_string = e.to_string();
 
                         return if error_string.contains("Host is down") {
-                            Err("Failed to connect to TV: Host is down".into())
+                            Err("Host is down".into())
                         } else {
-                            Err(format!("Failed to connect to TV: {error_string}"))
+                            Err(error_string)
                         };
                     }
-                    _ => Err(format!("Failed to connect to TV: {:?}", e)),
+                    _ => Err(e.to_string()),
                 }
             }
-            Err(_) => return Err("Failed to connect to TV: Connection timeout".into()),
+            Err(_) => return Err("Connection timeout".into()),
         };
 
         info!("WebSocket handshake has been successfully completed");
