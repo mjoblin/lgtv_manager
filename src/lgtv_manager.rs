@@ -534,7 +534,7 @@ impl LgTvManager {
                             }
                         }
                         StateMachineUpdateMessage::TransitionError(error) => {
-                            error!("State machine transition error: {:?}", &error);
+                            warn!("State machine transition error: {:?}", &error);
                             let _ = self.send_out(ManagerOutputMessage::Error(ManagerError::Action(error))).await;
                         }
                     }

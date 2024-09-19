@@ -384,7 +384,7 @@ impl LgTvManager {
         if let Some(ws_join_handle) = self.ws_join_handle.take() {
             match ws_join_handle.await {
                 Ok(_) => debug!("WebSocket join handle successfully awaited"),
-                Err(e) => error!("Could not await WebSocket join handle: {:?}", e),
+                Err(e) => warn!("Could not await WebSocket join handle: {:?}", e),
             }
         }
 
