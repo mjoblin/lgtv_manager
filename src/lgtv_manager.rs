@@ -658,7 +658,10 @@ impl LgTvManager {
 
                     // Handle the TV coming back online.
                     if !was_on_network && is_on_network {
-                        debug!("TV is on the network again; reconnect status: {:?}", &self.reconnect_flow_status);
+                        debug!(
+                            "TV is on the network again, while reconnect status was {:?}",
+                            &self.reconnect_flow_status
+                        );
                     }
 
                     let is_waiting_for_tv = self.reconnect_flow_status == ReconnectFlowStatus::WaitingForTvOnNetwork;
