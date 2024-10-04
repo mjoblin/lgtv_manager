@@ -393,7 +393,15 @@ impl LgTvManager {
         // A lost connection, once detected, still triggers the standard disconnect flow -- so if
         // we end up here handling a disconnect then we may want to trigger a reconnect.
         if self.reconnect_flow_status == ReconnectFlowStatus::Active {
-            self.initiate_reconnect(false).await;
+            if self.is_connection_initialized {
+                self.initiate_reconnect(false).await;
+            } else {
+                // Ending up here is likely only due to auto reconnect being enabled, but a
+                // previous connection had never been successfully initialized (likely due to a
+                // pair request failure).
+                warn!("Ignoring Active reconnect flow status because connection was never initialized");
+                self.set_reconnect_flow_status(ReconnectFlowStatus::Inactive).await;
+            }
         }
     }
 
