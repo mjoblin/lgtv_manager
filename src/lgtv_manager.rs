@@ -221,6 +221,7 @@ pub struct LgTvManager {
     tv_host_ip_notifier: Arc<Notify>,
     is_connection_initialized: bool, // TV connection has been made and initial setup commands are sent
     is_manual_disconnect_requested: bool, // Caller requested a manual disconnect
+    is_pairing: bool,
     tv_on_network_checker: TvNetworkChecker,
     is_testing_tv_on_network: Arc<AtomicBool>,
     is_tv_on_network: Arc<AtomicBool>,
@@ -288,6 +289,7 @@ impl LgTvManager {
             tv_host_ip_notifier: Arc::new(Notify::new()),
             is_connection_initialized: false,
             is_manual_disconnect_requested: false,
+            is_pairing: false,
             tv_on_network_checker: TvNetworkChecker::new(),
             is_testing_tv_on_network: Arc::new(AtomicBool::new(false)),
             is_tv_on_network: Arc::new(AtomicBool::new(false)),
@@ -497,10 +499,14 @@ impl LgTvManager {
                                 let _ = self.send_register_payload().await;
                             },
                             Output::PairWithTv => {
-                                // We don't need to take an action here as the registration flow
-                                // will have automatically triggered a prompt for pairing if required.
+                                // The registration flow will automatically trigger a prompt for
+                                // pairing if required.
+                                self.is_pairing = true;
                             },
                             Output::InitializeConnection => {
+                                // Any pair request (if there was one) must have been approved
+                                self.is_pairing = false;
+
                                 let _ = self.initialize_connection().await;
                             },
                             Output::SendCommand(lgtv_command) => {
@@ -752,6 +758,7 @@ impl LgTvManager {
             self.ws_url = None;
             self.mac_addr = None;
             self.session_connection_count = 0;
+            self.is_pairing = false;
         }
 
         if self.reconnect_flow_status == ReconnectFlowStatus::Cancelled {
