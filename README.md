@@ -243,8 +243,8 @@ a disconnect, and can still accept future `ManagerMessage::Connect` messages. Se
 ### Limitations
 
 The `lgtv_manager` crate is currently limited in scope. It only supports the `TvCommand` list
-found in `src/commands.rs`, and does not provide much in the way of configuration (such as timeout
-durations, reconnect intervals, etc).
+found in `src/tv_commands.rs`, and does not provide much in the way of configuration (such as
+timeout durations, reconnect intervals, etc).
 
 Extending `LgTvManager` to support additional TV commands should be fairly trivial, although
 LG's SSAP protocol does not appear to be documented. A good place to start is the
