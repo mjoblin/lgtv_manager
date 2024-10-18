@@ -268,7 +268,8 @@ impl LgTvManager {
                         self.tv_info = Some((*system_info_payload).clone().into());
                         self.emit_tv_info().await;
                     }
-                    LgTvResponsePayload::GetVolume(volume_payload) => {
+                    LgTvResponsePayload::GetVolumeVariantA(_)
+                    | LgTvResponsePayload::GetVolumeVariantB(_) => {
                         // This GetVolume payload will be received during both the initialization
                         // phase (due to the GetVolume subscription) and any subsequent
                         // SetVolume/SetMute calls. This means we can safely ignore the
@@ -293,10 +294,23 @@ impl LgTvManager {
                             info!("Manager ready to send commands to TV");
                         }
 
-                        self.tv_state.volume = Some(volume_payload.volume_status.volume);
-                        self.tv_state.is_muted = Some(volume_payload.volume_status.mute_status);
-                        self.tv_state.is_volume_settable =
-                            Some(volume_payload.volume_status.adjust_volume);
+                        match &command_response.payload {
+                            LgTvResponsePayload::GetVolumeVariantA(volume_payload) => {
+                                self.tv_state.volume = Some(volume_payload.volume_status.volume);
+                                self.tv_state.is_muted =
+                                    Some(volume_payload.volume_status.mute_status);
+                                self.tv_state.is_volume_settable =
+                                    Some(volume_payload.volume_status.adjust_volume);
+                            }
+                            LgTvResponsePayload::GetVolumeVariantB(volume_payload) => {
+                                self.tv_state.volume = Some(volume_payload.volume);
+                                self.tv_state.is_muted = Some(volume_payload.muted);
+                                self.tv_state.is_volume_settable =
+                                    Some(volume_payload.supportvolume);
+                            }
+                            _ => {}
+                        }
+
                         self.emit_tv_state().await;
                     }
                     LgTvResponsePayload::Pair(pair_info) => {
@@ -397,7 +411,8 @@ impl LgTvManager {
                 // If we're handling a disconnect while pairing then the pair request was likely
                 // cancelled or failed for some reason, so we don't want to auto-reconnect.
                 warn!("Ignoring Active reconnect flow status during failed pair request");
-                self.set_reconnect_flow_status(ReconnectFlowStatus::Inactive).await;
+                self.set_reconnect_flow_status(ReconnectFlowStatus::Inactive)
+                    .await;
                 self.is_pairing = false;
             } else {
                 self.initiate_reconnect(false).await;

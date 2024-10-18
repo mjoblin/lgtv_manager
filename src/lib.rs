@@ -15,6 +15,12 @@ protocol.
 * Wake-on-LAN support.
 * Persists last-connected TV details between sessions.
 
+## Limitations
+
+[`LgTvManager`] has only been tested against a small number of LG TVs, and different TVs sometimes
+behave differently (e.g. the SSAP payload shapes sometimes differ). As a result, `LgTvManager` is
+not guaranteed to work with all TVs.
+
 ## Overview
 
 An `LgTvManager` instance:
