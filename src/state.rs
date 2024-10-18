@@ -41,7 +41,7 @@ pub struct TvState {
 pub struct TvInfo {
     pub receiver_type: String,
     pub model_name: String,
-    pub serial_number: String,
+    pub serial_number: Option<String>,
     pub program_mode: bool,
 }
 
@@ -101,7 +101,7 @@ mod tests {
             TvInfo {
                 receiver_type: "TEST_RECEIVER_TYPE".to_string(),
                 model_name: "TEST_MODEL_NAME".to_string(),
-                serial_number: "TEST_SERIAL_NUMBER".to_string(),
+                serial_number: Some("TEST_SERIAL_NUMBER".to_string()),
                 program_mode: true,
             }
         );

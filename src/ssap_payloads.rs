@@ -37,7 +37,8 @@ pub(crate) enum LgTvResponsePayload {
     GetExternalInputList(GetExternalInputListPayload),
     GetPowerState(GetPowerStatePayload),
     GetSystemInfo(GetSystemInfoPayload),
-    GetVolume(GetVolumePayload),
+    GetVolumeVariantA(GetVolumePayloadVariantA),
+    GetVolumeVariantB(GetVolumePayloadVariantB),
     Pair(PairPayload),
     PlainReturnValue(PlainReturnValuePayload),
     SetMute(SetMutePayload),
@@ -149,18 +150,18 @@ pub struct ExternalInput {
     pub port: i64,
     pub connected: bool,
     #[serde(rename = "appId")]
-    pub app_id: String,
-    pub icon: String,
+    pub app_id: Option<String>,
+    pub icon: Option<String>,
     #[serde(rename = "forceIcon")]
-    pub force_icon: bool,
-    pub modified: bool,
+    pub force_icon: Option<bool>,
+    pub modified: Option<bool>,
     #[serde(rename = "lastUniqueId")]
-    pub last_unique_id: i64,
+    pub last_unique_id: Option<i64>,
     #[serde(rename = "hdmiPlugIn")]
-    pub hdmi_plug_in: bool,
+    pub hdmi_plug_in: Option<bool>,
     #[serde(rename = "subCount")]
-    pub sub_count: i64,
-    pub favorite: bool,
+    pub sub_count: Option<i64>,
+    pub favorite: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -184,20 +185,22 @@ pub(crate) struct GetPowerStatePayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Features {
-    pub dvr: bool,
+    #[serde(rename = "3d")]
+    pub three_d: Option<bool>,
+    pub dvr: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct GetSystemInfoPayload {
     #[serde(rename = "returnValue")]
     pub return_value: bool,
-    pub features: Features,
+    pub features: Option<Features>,
     #[serde(rename = "receiverType")]
     pub receiver_type: String,
     #[serde(rename = "modelName")]
     pub model_name: String,
     #[serde(rename = "serialNumber")]
-    pub serial_number: String,
+    pub serial_number: Option<String>, // "serial_number" isn't always present
     #[serde(rename = "programMode")]
     pub program_mode: bool,
 }
@@ -205,26 +208,26 @@ pub(crate) struct GetSystemInfoPayload {
 // VolumeStatus
 
 #[derive(Debug, Deserialize, Serialize)]
-pub(crate) struct VolumeStatus {
+pub(crate) struct VolumeStatusVariantA {
     #[serde(rename = "volumeLimitable")]
-    pub volume_limitable: bool,
+    pub volume_limitable: Option<bool>,
     #[serde(rename = "activeStatus")]
-    pub active_status: bool,
+    pub active_status: Option<bool>,
     #[serde(rename = "maxVolume")]
     pub max_volume: u8,
     #[serde(rename = "volumeLimiter")]
-    pub volume_limiter: String,
+    pub volume_limiter: Option<String>,
     #[serde(rename = "soundOutput")]
-    pub sound_output: String,
+    pub sound_output: Option<String>,
     pub volume: u8,
     pub cause: Option<String>, // "cause" is only included for "subscribe" payloads (not "request")
-    pub mode: String,
+    pub mode: Option<String>,
     #[serde(rename = "externalDeviceControl")]
-    pub external_device_control: bool,
+    pub external_device_control: Option<bool>,
     #[serde(rename = "muteStatus")]
     pub mute_status: bool,
     #[serde(rename = "volumeSyncable")]
-    pub volume_syncable: bool,
+    pub volume_syncable: Option<bool>,
     #[serde(rename = "adjustVolume")]
     pub adjust_volume: bool,
 }
@@ -232,13 +235,33 @@ pub(crate) struct VolumeStatus {
 // GetVolume
 
 #[derive(Debug, Deserialize, Serialize)]
-pub(crate) struct GetVolumePayload {
+pub(crate) struct GetVolumePayloadVariantA {
     #[serde(rename = "returnValue")]
     pub return_value: bool,
     #[serde(rename = "volumeStatus")]
-    pub volume_status: VolumeStatus,
+    pub volume_status: VolumeStatusVariantA,
     #[serde(rename = "callerId")]
-    pub caller_id: String,
+    pub caller_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct GetVolumePayloadVariantB {
+    #[serde(rename = "returnValue")]
+    pub return_value: bool,
+    #[serde(rename = "volumeMax")]
+    pub volume_max: u8,
+    pub ringtonewithvibration: Option<bool>,
+    pub scenario: Option<String>,
+    pub muted: bool,
+    pub hac: Option<bool>,
+    pub subscribed: Option<bool>,
+    pub volume: u8,
+    pub action: Option<String>,
+    pub supportvolume: bool,
+    #[serde(rename = "ringer switch")]
+    pub ringer_switch: Option<bool>,
+    pub slider: Option<bool>,
+    pub active: Option<bool>,
 }
 
 // SetMute
