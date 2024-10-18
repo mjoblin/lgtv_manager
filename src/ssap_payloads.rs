@@ -206,6 +206,9 @@ pub(crate) struct GetSystemInfoPayload {
 }
 
 // VolumeStatus
+//
+// Two variants of VolumeStatus payloads have been seen across various TVs. There could be other
+// variants not allowed for here.
 
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct VolumeStatusVariantA {
