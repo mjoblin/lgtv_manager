@@ -112,6 +112,8 @@ pub enum ManagerOutputMessage {
     TvState(TvState),
     /// A TV error occurred.
     TvError(String),
+    /// An unrecognized payload was received from the TV.
+    TvUnrecognizedPayload(String),
 }
 
 // ================================================================================================
@@ -605,7 +607,11 @@ impl LgTvManager {
                                         }
                                     },
                                     Err(error) => {
-                                        // This is not a fatal error
+                                        // Invalid payloads are not fatal
+                                        let _ = self.send_out(
+                                            ManagerOutputMessage::TvUnrecognizedPayload(ws_payload.clone())
+                                        ).await;
+
                                         warn!(
                                             "Received unknown response payload from TV: {:?} :: {:?}",
                                             error,
